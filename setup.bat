@@ -1,6 +1,12 @@
-:: For .bat (Windows)
-docker compose --env-file .\app\.env up -d --build
+IF NOT EXIST app\.env (
+  echo Creating .env from .env.example
+  copy app\.env.example app\.env
+)
+
+docker compose --env-file app\.env up -d --build
+
 docker compose exec app composer install
 docker compose exec app php artisan key:generate
 docker compose exec app php artisan migrate
+
 pause
