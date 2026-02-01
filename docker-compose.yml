@@ -31,10 +31,11 @@ services:
     image: mysql:8.0
     container_name: laravel_mysql
     environment:
-      MYSQL_DATABASE: laravel
+      # Pulled from `docker compose --env-file ./app/.env ...`
+      MYSQL_DATABASE: ${DB_DATABASE:-laravel}
+      MYSQL_USER: ${DB_USERNAME:-laravel}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-laravel}
       MYSQL_ROOT_PASSWORD: root
-      MYSQL_USER: laravel
-      MYSQL_PASSWORD: laravel
     ports:
       - "3306:3306"
     volumes:
