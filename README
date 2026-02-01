@@ -1,0 +1,19 @@
+If you change database credentials,
+DB_CONNECTION=mysql
+DB_HOST=mysql
+DB_PORT=3306
+DB_DATABASE=laravel
+DB_USERNAME=laravel
+DB_PASSWORD=laravel
+
+update them in **both** places:
+1) `app/.env`
+2) `docker-compose.yml` (under the `mysql` service `environment` section)
+
+To set up and run the application, use the appropriate setup script for your operating system:
+-- setup.sh (Mac/Linux)
+chmod +x setup.sh
+./setup.sh
+
+-- setup.bat (Windows)
+Double click .bat file
