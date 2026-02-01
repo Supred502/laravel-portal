@@ -3,6 +3,7 @@ Database credentials live in `app/.env`.
 The Docker Compose stack is started with `--env-file ./app/.env`, so the MySQL container and Laravel app stay in sync without duplicating credentials in `docker-compose.yml`.
 
 To set up and run the application, use the appropriate setup script for your operating system:
+
 -- setup.sh (Mac/Linux)
 chmod +x setup.sh
 ./setup.sh
