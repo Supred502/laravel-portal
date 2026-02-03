@@ -6,7 +6,6 @@ To set up and run the application, use the appropriate setup script for your ope
 
 -- setup.sh (Mac/Linux)
 chmod +x setup.sh
-./setup.sh
 
 -- setup.bat (Windows)
 Double click .bat file
