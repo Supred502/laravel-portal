@@ -45,4 +45,9 @@ class User extends Authenticatable
             'password' => 'hashed',
         ];
     }
+
+    public function restActionLogs()
+    {
+        return $this->hasMany(RestActionLog::class);
+    }
 }
