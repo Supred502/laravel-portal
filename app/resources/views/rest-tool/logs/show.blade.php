@@ -85,5 +85,25 @@
             area.style.height = "auto";
             area.style.height = `${area.scrollHeight}px`;
         });
+
+        (function () {
+            const method = "{{ strtoupper($log->method) }}";
+            if (method !== "POST") {
+                return;
+            }
+            try {
+                const pending = localStorage.getItem("restTool.changeMap.pendingPost");
+                if (!pending) {
+                    return;
+                }
+                localStorage.setItem(
+                    "restTool.changeMap.{{ $log->id }}",
+                    pending,
+                );
+                localStorage.removeItem("restTool.changeMap.pendingPost");
+            } catch (e) {
+                // ignore storage errors
+            }
+        })();
     </script>
 </x-app-layout>

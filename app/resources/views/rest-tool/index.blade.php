@@ -327,6 +327,7 @@
     <textarea id="original-xml" class="hidden">{{ e($xmlRaw ?? '') }}</textarea>
     @if ($selectedLog)
         <input type="hidden" id="rest-tool-log-id" value="{{ $selectedLog->id }}" />
+        <input type="hidden" id="rest-tool-log-method" value="{{ $selectedLogMethod }}" />
     @endif
 
     <div class="hidden" id="selected-node-editor">

@@ -31,7 +31,11 @@ class RestToolController extends Controller
             $log = RestActionLog::where('user_id', $request->user()->id)
                 ->findOrFail($request->input('log'));
 
-            $xmlRaw = $log->request_xml ?: $log->response_xml;
+            if ($log->method === 'POST') {
+                $xmlRaw = $log->base_request_xml ?: $log->request_xml ?: $log->response_xml;
+            } else {
+                $xmlRaw = $log->request_xml ?: $log->response_xml;
+            }
 
             if ($log->method === 'GET') {
                 $fetchStatus = $log->status_code ? 'GET ' . $log->status_code : 'GET failed';
@@ -73,6 +77,7 @@ class RestToolController extends Controller
             'rememberedUrl' => $rememberedUrl,
             'rememberAuth' => $rememberAuth,
             'selectedLog' => $log,
+            'selectedLogMethod' => $log?->method,
         ]);
     }
 
@@ -166,24 +171,13 @@ class RestToolController extends Controller
         session()->flash('rest_tool.fetch_status', $statusCode ? 'GET ' . $statusCode : 'GET failed');
         session()->flash('rest_tool.fetch_error', $fetchError);
 
-        return view('rest-tool.index', [
-            'xmlRaw' => $xmlRaw,
-            'xmlFormatted' => $xmlFormatted,
-            'xmlTree' => $xmlTree,
-            'xmlRows' => $xmlRows,
-            'fetchStatus' => $statusCode ? 'GET ' . $statusCode : 'GET failed',
-            'fetchError' => $fetchError,
-            'postStatus' => null,
-            'postError' => null,
-            'postResponseXml' => null,
-            'postResponseFormatted' => null,
-            'postResponseDisplay' => null,
-            'rememberedAuthUsername' => session('rest_tool.auth_username'),
-            'rememberedAuthPassword' => session('rest_tool.auth_password'),
-            'rememberedUrl' => session('rest_tool.url'),
-            'rememberAuth' => session('rest_tool.remember_auth', false),
-            'selectedLog' => null,
-        ]);
+        if ($success) {
+            return redirect()
+                ->route('rest-tool.index', ['log' => $log->id]);
+        }
+
+        return redirect()
+            ->route('rest-tool.logs.show', ['id' => $log->id]);
     }
 
     public function postXml(Request $request)
@@ -298,6 +292,7 @@ class RestToolController extends Controller
             'status_code' => $statusCode,
             'success' => $success,
             'request_xml' => $xmlPayload,
+            'base_request_xml' => $validator->validated()['request_xml'] ?? null,
             'response_xml' => $responseXml,
             'error_message' => $postError,
             'auth_username' => $username,

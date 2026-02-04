@@ -1,13 +1,32 @@
 (function () {
     const changeMap = {};
     const changeTracker = document.getElementById("change-tracker");
+    function decodeHtmlEntities(value) {
+        if (!value) {
+            return "";
+        }
+        const textarea = document.createElement("textarea");
+        textarea.innerHTML = value;
+        return textarea.value || "";
+    }
+
     const originalXmlElement = document.getElementById("original-xml");
-    const originalXml = originalXmlElement ? originalXmlElement.value : "";
+    const originalXmlRaw = originalXmlElement ? originalXmlElement.value : "";
+    const originalXml = decodeHtmlEntities(originalXmlRaw);
     const logIdElement = document.getElementById("rest-tool-log-id");
+    const logMethodElement = document.getElementById("rest-tool-log-method");
     const rawLogId = logIdElement ? logIdElement.value.trim() : "";
     const logId = /^[0-9]+$/.test(rawLogId) ? rawLogId : "";
-    const changeKey = logId ? `restTool.changeMap.${logId}` : null;
+    const logMethod = logMethodElement
+        ? logMethodElement.value.trim().toUpperCase()
+        : "";
+    const allowChangePersistence = !logMethod || logMethod !== "GET";
+    const changeKey =
+        allowChangePersistence && logId ? `restTool.changeMap.${logId}` : null;
+    const formattedXml = document.getElementById("formatted-xml");
+    const formattedXmlOriginal = formattedXml ? formattedXml.value : "";
     const generatedXmlArea = document.getElementById("generated-xml");
+    const requestXmlField = document.getElementById("request-xml");
     const editor = document.getElementById("selected-node-editor");
     const editorPath = document.getElementById("selected-node-path");
     const editorOriginal = document.getElementById("selected-node-original");
@@ -33,6 +52,9 @@
     }
 
     function saveChangeMap() {
+        if (!allowChangePersistence) {
+            return;
+        }
         try {
             if (changeKey) {
                 localStorage.setItem(changeKey, JSON.stringify(changeMap));
@@ -72,7 +94,102 @@
         });
     }
 
+    function formatXmlString(xml) {
+        const reg = /(>)(<)(\/*)/g;
+        const padChar = "  ";
+        let formatted = "";
+        let pad = 0;
+        xml.replace(reg, "$1\n$2$3")
+            .split("\n")
+            .forEach((node) => {
+                if (!node.trim()) {
+                    return;
+                }
+                let indent = 0;
+                if (node.match(/.+<\/\w[^>]*>$/)) {
+                    indent = 0;
+                } else if (node.match(/^<\/\w/)) {
+                    pad = Math.max(pad - 1, 0);
+                } else if (node.match(/^<\w([^>]*[^\/])?>.*$/)) {
+                    indent = 1;
+                }
+                formatted += `${padChar.repeat(pad)}${node}\n`;
+                pad += indent;
+            });
+        return formatted.trim();
+    }
+
+    function buildUpdatedXmlFromChanges() {
+        if (!originalXml) {
+            return null;
+        }
+        if (Object.keys(changeMap).length === 0) {
+            return null;
+        }
+
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(originalXml, "application/xml");
+        if (doc.querySelector("parsererror")) {
+            return null;
+        }
+        const root = doc.documentElement;
+        if (!root) {
+            return null;
+        }
+
+        Object.keys(changeMap).forEach((path) => {
+            const segments = parsePathSegments(path);
+            if (segments.length === 0) {
+                return;
+            }
+            if (segments[0].name !== root.nodeName) {
+                return;
+            }
+
+            let node = root;
+            for (let i = 1; i < segments.length; i += 1) {
+                const segment = segments[i];
+                const next = getNthChild(node, segment.name, segment.index);
+                if (!next) {
+                    return;
+                }
+                node = next;
+            }
+
+            node.textContent = changeMap[path].value ?? "";
+        });
+
+        const serializer = new XMLSerializer();
+        return serializer.serializeToString(doc);
+    }
+
+    function updateFormattedXmlFromChanges() {
+        if (!formattedXml) {
+            return;
+        }
+        if (Object.keys(changeMap).length === 0) {
+            if (formattedXmlOriginal) {
+                formattedXml.value = formattedXmlOriginal;
+                resizeFormattedXml();
+            }
+            return;
+        }
+        const updated = buildUpdatedXmlFromChanges();
+        if (!updated) {
+            return;
+        }
+        formattedXml.value = formatXmlString(updated);
+        resizeFormattedXml();
+    }
+
     function loadChangeMap() {
+        if (!allowChangePersistence) {
+            Object.keys(changeMap).forEach((key) => {
+                delete changeMap[key];
+            });
+            renderChangeTracker();
+            return;
+        }
         if (!changeKey) {
             Object.keys(changeMap).forEach((key) => {
                 delete changeMap[key];
@@ -104,6 +221,7 @@
 
             renderChangeTracker();
             applyChangesToInputs();
+            updateFormattedXmlFromChanges();
             return;
         }
 
@@ -114,6 +232,7 @@
             });
             renderChangeTracker();
             applyChangesToInputs();
+            updateFormattedXmlFromChanges();
         } catch (e) {
             renderChangeTracker();
         }
@@ -130,6 +249,7 @@
         }
         renderChangeTracker();
         saveChangeMap();
+        updateFormattedXmlFromChanges();
     }
 
     document.addEventListener("input", (event) => {
@@ -235,6 +355,31 @@
                     nodeValue.textContent = value;
                     nodeValue.setAttribute("data-node-value", value);
                 });
+        });
+    }
+
+    const postForm = document.getElementById("post-xml-form");
+    if (postForm) {
+        postForm.addEventListener("submit", () => {
+            if (requestXmlField) {
+                requestXmlField.value = originalXml || "";
+            }
+            if (generatedXmlArea) {
+                generatedXmlArea.value = buildMinimalXmlString();
+            }
+            try {
+                const keys = Object.keys(changeMap);
+                if (keys.length === 0) {
+                    localStorage.removeItem("restTool.changeMap.pendingPost");
+                    return;
+                }
+                localStorage.setItem(
+                    "restTool.changeMap.pendingPost",
+                    JSON.stringify(changeMap),
+                );
+            } catch (e) {
+                // ignore storage errors
+            }
         });
     }
 
@@ -360,7 +505,6 @@
         });
     }
 
-    const formattedXml = document.getElementById("formatted-xml");
     function resizeFormattedXml() {
         if (!formattedXml) {
             return;
@@ -487,19 +631,13 @@
         return updated[segment.index - 1];
     }
 
-    function generateMinimalXml() {
+    function buildMinimalXmlString() {
         if (!originalXml) {
-            if (generatedXmlArea) {
-                generatedXmlArea.value = "";
-            }
-            return;
+            return "";
         }
 
         if (Object.keys(changeMap).length === 0) {
-            if (generatedXmlArea) {
-                generatedXmlArea.value = "";
-            }
-            return;
+            return "";
         }
 
         const parser = new DOMParser();
@@ -508,10 +646,7 @@
             "application/xml",
         );
         if (originalDoc.querySelector("parsererror")) {
-            if (generatedXmlArea) {
-                generatedXmlArea.value = "";
-            }
-            return;
+            return "";
         }
 
         const root = originalDoc.documentElement;
@@ -555,10 +690,14 @@
         });
 
         const serializer = new XMLSerializer();
-        const xmlString = serializer.serializeToString(minimalDoc);
-        if (generatedXmlArea) {
-            generatedXmlArea.value = xmlString;
+        return serializer.serializeToString(minimalDoc);
+    }
+
+    function generateMinimalXml() {
+        if (!generatedXmlArea) {
+            return;
         }
+        generatedXmlArea.value = buildMinimalXmlString();
     }
 
     const generateButton = document.getElementById("generate-minimal-xml");

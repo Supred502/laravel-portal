@@ -16,6 +16,7 @@ class RestActionLog extends Model
         'status_code',
         'success',
         'request_xml',
+        'base_request_xml',
         'response_xml',
         'error_message',
         'auth_username',
