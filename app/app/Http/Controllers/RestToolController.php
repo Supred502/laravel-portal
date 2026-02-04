@@ -67,7 +67,7 @@ class RestToolController extends Controller
             'postError' => session('rest_tool.post_error'),
             'postResponseXml' => session('rest_tool.post_response_xml'),
             'postResponseFormatted' => session('rest_tool.post_response_formatted'),
-            'postResponseDisplay' => null,
+            'postResponseDisplay' => session('rest_tool.post_response_display'),
             'rememberedAuthUsername' => $rememberedAuthUsername,
             'rememberedAuthPassword' => $rememberedAuthPassword,
             'rememberedUrl' => $rememberedUrl,
@@ -177,11 +177,12 @@ class RestToolController extends Controller
             'postError' => null,
             'postResponseXml' => null,
             'postResponseFormatted' => null,
+            'postResponseDisplay' => null,
             'rememberedAuthUsername' => session('rest_tool.auth_username'),
             'rememberedAuthPassword' => session('rest_tool.auth_password'),
             'rememberedUrl' => session('rest_tool.url'),
             'rememberAuth' => session('rest_tool.remember_auth', false),
-            'selectedLog' => $log,
+            'selectedLog' => null,
         ]);
     }
 
@@ -306,6 +307,7 @@ class RestToolController extends Controller
         session()->flash('rest_tool.post_error', $postError);
         session()->flash('rest_tool.post_response_xml', $responseXml);
         session()->flash('rest_tool.post_response_formatted', $postResponseFormatted);
+        session()->flash('rest_tool.post_response_display', $postResponseDisplay);
 
         $xmlRaw = $validator->validated()['request_xml'] ?? null;
         $xmlFormatted = null;
@@ -324,24 +326,8 @@ class RestToolController extends Controller
             }
         }
 
-        return view('rest-tool.index', [
-            'xmlRaw' => $xmlRaw,
-            'xmlFormatted' => $xmlFormatted,
-            'xmlTree' => $xmlTree,
-            'xmlRows' => $xmlRows,
-            'fetchStatus' => session('rest_tool.fetch_status'),
-            'fetchError' => session('rest_tool.fetch_error'),
-            'postStatus' => $statusCode ? 'POST ' . $statusCode : 'POST failed',
-            'postError' => $postError,
-            'postResponseXml' => $responseXml,
-            'postResponseFormatted' => $postResponseFormatted,
-            'postResponseDisplay' => $postResponseDisplay,
-            'rememberedAuthUsername' => session('rest_tool.auth_username'),
-            'rememberedAuthPassword' => session('rest_tool.auth_password'),
-            'rememberedUrl' => session('rest_tool.url'),
-            'rememberAuth' => session('rest_tool.remember_auth', false),
-            'selectedLog' => $log,
-        ]);
+        return redirect()
+            ->route('rest-tool.logs.show', ['id' => $log->id]);
     }
 
     public function logs(Request $request)

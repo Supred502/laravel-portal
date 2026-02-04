@@ -325,7 +325,9 @@
     </div>
 
     <textarea id="original-xml" class="hidden">{{ e($xmlRaw ?? '') }}</textarea>
-    <input type="hidden" id="rest-tool-log-id" value="{{ $selectedLog?->id }}" />
+    @if ($selectedLog)
+        <input type="hidden" id="rest-tool-log-id" value="{{ $selectedLog->id }}" />
+    @endif
 
     <div class="hidden" id="selected-node-editor">
         <div class="fixed bottom-6 right-6 w-80 bg-white shadow-lg rounded-lg border border-gray-200 p-4">
@@ -364,5 +366,5 @@
         }
     </script>
 
-    <script src="{{ asset('js/xml-tree.js') }}"></script>
+    <script src="{{ asset('js/xml-tree.js') }}?v={{ filemtime(public_path('js/xml-tree.js')) }}"></script>
 </x-app-layout>

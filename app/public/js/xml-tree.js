@@ -4,12 +4,10 @@
     const originalXmlElement = document.getElementById("original-xml");
     const originalXml = originalXmlElement ? originalXmlElement.value : "";
     const logIdElement = document.getElementById("rest-tool-log-id");
-    const logId = logIdElement ? logIdElement.value.trim() : "";
-    const changeKey = logId
-        ? `restTool.changeMap.${logId}`
-        : "restTool.changeMap.last";
+    const rawLogId = logIdElement ? logIdElement.value.trim() : "";
+    const logId = /^[0-9]+$/.test(rawLogId) ? rawLogId : "";
+    const changeKey = logId ? `restTool.changeMap.${logId}` : null;
     const generatedXmlArea = document.getElementById("generated-xml");
-    const xmlInputs = document.querySelectorAll(".xml-edit-input");
     const editor = document.getElementById("selected-node-editor");
     const editorPath = document.getElementById("selected-node-path");
     const editorOriginal = document.getElementById("selected-node-original");
@@ -36,7 +34,9 @@
 
     function saveChangeMap() {
         try {
-            localStorage.setItem(changeKey, JSON.stringify(changeMap));
+            if (changeKey) {
+                localStorage.setItem(changeKey, JSON.stringify(changeMap));
+            }
             localStorage.setItem(
                 "restTool.changeMap.last",
                 JSON.stringify(changeMap),
@@ -73,18 +73,37 @@
     }
 
     function loadChangeMap() {
+        if (!changeKey) {
+            Object.keys(changeMap).forEach((key) => {
+                delete changeMap[key];
+            });
+            renderChangeTracker();
+            return;
+        }
         let stored = null;
         try {
             stored = localStorage.getItem(changeKey);
-            if (!stored && logId) {
-                stored = localStorage.getItem("restTool.changeMap.last");
-            }
         } catch (e) {
             stored = null;
         }
 
         if (!stored) {
+            try {
+                stored = localStorage.getItem("restTool.changeMap.last");
+                if (stored) {
+                    const parsed = JSON.parse(stored);
+                    Object.keys(parsed || {}).forEach((key) => {
+                        changeMap[key] = parsed[key];
+                    });
+                    saveChangeMap();
+                    localStorage.removeItem("restTool.changeMap.last");
+                }
+            } catch (e) {
+                stored = null;
+            }
+
             renderChangeTracker();
+            applyChangesToInputs();
             return;
         }
 
@@ -95,9 +114,6 @@
             });
             renderChangeTracker();
             applyChangesToInputs();
-            if (logId && !localStorage.getItem(changeKey)) {
-                saveChangeMap();
-            }
         } catch (e) {
             renderChangeTracker();
         }
@@ -116,9 +132,13 @@
         saveChangeMap();
     }
 
-    xmlInputs.forEach((input) => {
-        input.addEventListener("input", (event) => {
-            const target = event.target;
+    document.addEventListener("input", (event) => {
+        const target = event.target;
+        if (!target) {
+            return;
+        }
+
+        if (target.classList?.contains("xml-edit-input")) {
             const value =
                 "value" in target ? target.value : target.textContent || "";
             updateChange(
@@ -126,7 +146,31 @@
                 target.dataset.original || "",
                 value,
             );
-        });
+            return;
+        }
+
+        if (
+            target.matches &&
+            target.matches('.node-value[contenteditable="true"]')
+        ) {
+            const path = target.dataset.nodePath;
+            const original = target.dataset.nodeOriginal || "";
+            const value = target.textContent || "";
+            target.setAttribute("data-node-value", value);
+            updateChange(path, original, value);
+
+            document
+                .querySelectorAll(
+                    `.xml-edit-input[data-path="${CSS.escape(path)}"]`,
+                )
+                .forEach((input) => {
+                    if ("value" in input) {
+                        input.value = value;
+                    } else {
+                        input.textContent = value;
+                    }
+                });
+        }
     });
 
     loadChangeMap();
@@ -146,41 +190,17 @@
         editor.classList.remove("hidden");
     }
 
-    document.querySelectorAll(".node-label, .node-value").forEach((node) => {
-        node.addEventListener("click", (event) => {
-            const target = event.currentTarget;
-            openEditor(
-                target.dataset.nodePath,
-                target.dataset.nodeValue,
-                target.dataset.nodeOriginal,
-            );
-        });
+    document.addEventListener("click", (event) => {
+        const target = event.target?.closest?.(".node-label, .node-value");
+        if (!target) {
+            return;
+        }
+        openEditor(
+            target.dataset.nodePath,
+            target.dataset.nodeValue,
+            target.dataset.nodeOriginal,
+        );
     });
-
-    document
-        .querySelectorAll('.node-value[contenteditable="true"]')
-        .forEach((node) => {
-            node.addEventListener("input", (event) => {
-                const target = event.currentTarget;
-                const path = target.dataset.nodePath;
-                const original = target.dataset.nodeOriginal || "";
-                const value = target.textContent || "";
-                target.setAttribute("data-node-value", value);
-                updateChange(path, original, value);
-
-                document
-                    .querySelectorAll(
-                        `.xml-edit-input[data-path="${CSS.escape(path)}"]`,
-                    )
-                    .forEach((input) => {
-                        if ("value" in input) {
-                            input.value = value;
-                        } else {
-                            input.textContent = value;
-                        }
-                    });
-            });
-        });
 
     if (editorApply) {
         editorApply.addEventListener("click", () => {
