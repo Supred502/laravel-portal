@@ -24,6 +24,11 @@ class RestToolController extends Controller
 
         $fetchStatus = session('rest_tool.fetch_status');
         $fetchError = session('rest_tool.fetch_error');
+        $postStatus = session('rest_tool.post_status');
+        $postError = session('rest_tool.post_error');
+        $postResponseXml = session('rest_tool.post_response_xml');
+        $postResponseFormatted = session('rest_tool.post_response_formatted');
+        $postResponseDisplay = session('rest_tool.post_response_display');
         $rememberedAuthUsername = session('rest_tool.auth_username');
         $rememberedAuthPassword = session('rest_tool.auth_password');
         $rememberedUrl = session('rest_tool.url');
@@ -42,6 +47,23 @@ class RestToolController extends Controller
             if ($log->method === 'GET') {
                 $fetchStatus = $log->status_code ? 'GET ' . $log->status_code : 'GET failed';
                 $fetchError = $log->error_message;
+                $rememberedUrl = $log->url ?? $rememberedUrl;
+                if ($log->auth_username) {
+                    $rememberedAuthUsername = $log->auth_username;
+                }
+            } elseif ($log->method === 'POST') {
+                $postStatus = $log->status_code ? 'POST ' . $log->status_code : 'POST failed';
+                $postError = $log->error_message;
+                $postResponseXml = $log->response_xml;
+                $postResponseDisplay = $this->decodeXmlForDisplay($log->response_xml);
+                $postResponseFormatted = null;
+                if ($log->response_xml) {
+                    try {
+                        $postResponseFormatted = $this->parseXml($postResponseDisplay ?? $log->response_xml)['formatted'];
+                    } catch (Exception $exception) {
+                        $postResponseFormatted = null;
+                    }
+                }
                 $rememberedUrl = $log->url ?? $rememberedUrl;
                 if ($log->auth_username) {
                     $rememberedAuthUsername = $log->auth_username;
@@ -69,11 +91,11 @@ class RestToolController extends Controller
             'xmlRows' => $xmlRows,
             'fetchStatus' => $fetchStatus,
             'fetchError' => $fetchError,
-            'postStatus' => session('rest_tool.post_status'),
-            'postError' => session('rest_tool.post_error'),
-            'postResponseXml' => session('rest_tool.post_response_xml'),
-            'postResponseFormatted' => session('rest_tool.post_response_formatted'),
-            'postResponseDisplay' => session('rest_tool.post_response_display'),
+            'postStatus' => $postStatus,
+            'postError' => $postError,
+            'postResponseXml' => $postResponseXml,
+            'postResponseFormatted' => $postResponseFormatted,
+            'postResponseDisplay' => $postResponseDisplay,
             'rememberedAuthUsername' => $rememberedAuthUsername,
             'rememberedAuthPassword' => $rememberedAuthPassword,
             'rememberedUrl' => $rememberedUrl,
@@ -247,35 +269,75 @@ class RestToolController extends Controller
             $isAttachmentsEndpoint = str_contains($path, '/attachments');
 
             if (!$isAttachmentsEndpoint && !$xmlPayload) {
-                return redirect()->route('rest-tool.index')
-                    ->with('rest_tool.post_error', 'No XML to send.')
-                    ->withInput();
+                $errorMessage = 'No XML to send.';
+                $log = $this->createFailedPostLog(
+                    $request,
+                    $postUrl,
+                    $username,
+                    $xmlPayload,
+                    $validated['request_xml'] ?? null,
+                    $errorMessage
+                );
+
+                return redirect()->route('rest-tool.logs.show', ['id' => $log->id]);
             }
 
             if ($xmlPayload && strlen($xmlPayload) > 2 * 1024 * 1024) {
-                return redirect()->route('rest-tool.index')
-                    ->with('rest_tool.post_error', 'XML payload exceeds 2MB limit.')
-                    ->withInput();
+                $errorMessage = 'XML payload exceeds 2MB limit.';
+                $log = $this->createFailedPostLog(
+                    $request,
+                    $postUrl,
+                    $username,
+                    $xmlPayload,
+                    $validated['request_xml'] ?? null,
+                    $errorMessage
+                );
+
+                return redirect()->route('rest-tool.logs.show', ['id' => $log->id]);
             }
 
             if (!empty($attachments) && !$isAttachmentsEndpoint) {
-                return redirect()->route('rest-tool.index')
-                    ->with('rest_tool.post_error', 'Use an /attachments URL to upload PDF files.')
-                    ->withInput();
+                $errorMessage = 'Use an /attachments URL to upload PDF files.';
+                $log = $this->createFailedPostLog(
+                    $request,
+                    $postUrl,
+                    $username,
+                    $xmlPayload,
+                    $validated['request_xml'] ?? null,
+                    $errorMessage
+                );
+
+                return redirect()->route('rest-tool.logs.show', ['id' => $log->id]);
             }
 
             if ($isAttachmentsEndpoint) {
                 if (empty($attachments)) {
-                    return redirect()->route('rest-tool.index')
-                        ->with('rest_tool.post_error', 'Select a PDF file for attachments.')
-                        ->withInput();
+                    $errorMessage = 'Select a PDF file for attachments.';
+                    $log = $this->createFailedPostLog(
+                        $request,
+                        $postUrl,
+                        $username,
+                        $xmlPayload,
+                        $validated['request_xml'] ?? null,
+                        $errorMessage
+                    );
+
+                    return redirect()->route('rest-tool.logs.show', ['id' => $log->id]);
                 }
 
                 $storageId = $validated['attachment_storage_id'] ?? null;
                 if (!$storageId) {
-                    return redirect()->route('rest-tool.index')
-                        ->with('rest_tool.post_error', 'Storage ID is required for attachments.')
-                        ->withInput();
+                    $errorMessage = 'Storage ID is required for attachments.';
+                    $log = $this->createFailedPostLog(
+                        $request,
+                        $postUrl,
+                        $username,
+                        $xmlPayload,
+                        $validated['request_xml'] ?? null,
+                        $errorMessage
+                    );
+
+                    return redirect()->route('rest-tool.logs.show', ['id' => $log->id]);
                 }
                 $author = $validated['attachment_author']
                     ?? $validated['auth_username']
@@ -351,9 +413,6 @@ class RestToolController extends Controller
 
         session()->flash('rest_tool.post_status', $statusCode ? 'POST ' . $statusCode : 'POST failed');
         session()->flash('rest_tool.post_error', $postError);
-        session()->flash('rest_tool.post_response_xml', $responseXml);
-        session()->flash('rest_tool.post_response_formatted', $postResponseFormatted);
-        session()->flash('rest_tool.post_response_display', $postResponseDisplay);
 
         $xmlRaw = $validator->validated()['request_xml'] ?? null;
         $xmlFormatted = null;
@@ -378,7 +437,17 @@ class RestToolController extends Controller
 
     public function logs(Request $request)
     {
-        $logs = RestActionLog::with('user')
+        $logs = RestActionLog::query()
+            ->select([
+                'id',
+                'user_id',
+                'method',
+                'url',
+                'status_code',
+                'success',
+                'created_at',
+            ])
+            ->with(['user:id,name'])
             ->where('user_id', $request->user()->id)
             ->orderByDesc('created_at')
             ->paginate(20);
@@ -573,6 +642,33 @@ class RestToolController extends Controller
         return $groups;
     }
 
+    private function createFailedPostLog(
+        Request $request,
+        string $postUrl,
+        ?string $username,
+        ?string $xmlPayload,
+        ?string $baseRequestXml,
+        string $errorMessage
+    ): RestActionLog {
+        $logData = [
+            'user_id' => $request->user()->id,
+            'method' => 'POST',
+            'url' => $postUrl,
+            'status_code' => null,
+            'success' => false,
+            'request_xml' => $xmlPayload,
+            'response_xml' => null,
+            'error_message' => $errorMessage,
+            'auth_username' => $username,
+        ];
+
+        if (Schema::hasColumn('rest_action_logs', 'base_request_xml')) {
+            $logData['base_request_xml'] = $baseRequestXml;
+        }
+
+        return RestActionLog::create($logData);
+    }
+
     private function pickRowSummary(array $fields): ?string
     {
         if (empty($fields)) {
@@ -680,29 +776,29 @@ class RestToolController extends Controller
         return mb_substr($value, 0, $limit) . '…';
     }
 
-        private function buildAttachmentXml($file, int $storageId, ?string $author, ?string $description, ?string $comment): string
-        {
-                $filename = method_exists($file, 'getClientOriginalName')
-                        ? $file->getClientOriginalName()
-                        : (string) ($file['name'] ?? 'attachment.pdf');
+    private function buildAttachmentXml($file, int $storageId, ?string $author, ?string $description, ?string $comment): string
+    {
+        $filename = method_exists($file, 'getClientOriginalName')
+            ? $file->getClientOriginalName()
+            : (string) ($file['name'] ?? 'attachment.pdf');
 
-            $fileContents = method_exists($file, 'getRealPath')
-                ? file_get_contents($file->getRealPath())
-                : null;
-            $fileContents = $fileContents === false ? null : $fileContents;
-            $fileSizeBytes = $fileContents !== null ? strlen($fileContents) : 0;
-            $fileSizeKb = $fileSizeBytes > 0 ? (int) ceil($fileSizeBytes / 1024) : 0;
-            $fileData = $fileContents !== null ? base64_encode($fileContents) : '';
+        $fileContents = method_exists($file, 'getRealPath')
+            ? file_get_contents($file->getRealPath())
+            : null;
+        $fileContents = $fileContents === false ? null : $fileContents;
+        $fileSizeBytes = $fileContents !== null ? strlen($fileContents) : 0;
+        $fileSizeKb = $fileSizeBytes > 0 ? (int) ceil($fileSizeBytes / 1024) : 0;
+        $fileData = $fileContents !== null ? base64_encode($fileContents) : '';
 
-                $now = Carbon::now();
-                $created = $now->format('Y-m-d\TH:i:s.vP');
-                $fileAddTime = $now->format('Y-m-d');
+        $now = Carbon::now();
+        $created = $now->format('Y-m-d\TH:i:s.vP');
+        $fileAddTime = $now->format('Y-m-d');
 
-                $author = $author ?: '';
-                $description = $description ?: '';
-                $comment = $comment ?: '';
+        $author = $author ?: '';
+        $description = $description ?: '';
+        $comment = $comment ?: '';
 
-                $xml = <<<XML
+        $xml = <<<XML
 <?xml version="1.0" encoding="UTF-8"?>
 <resource>
     <description>Pievienotais fails</description>
@@ -731,79 +827,79 @@ class RestToolController extends Controller
 </resource>
 XML;
 
-                return $xml;
-        }
+        return $xml;
+    }
 
-        private function escapeXml(string $value): string
-        {
-                return htmlspecialchars($value, ENT_QUOTES | ENT_XML1, 'UTF-8');
-        }
+    private function escapeXml(string $value): string
+    {
+        return htmlspecialchars($value, ENT_QUOTES | ENT_XML1, 'UTF-8');
+    }
 
-        private function extractAttachmentUrl($response, ?string $responseXml, string $baseUrl): ?string
-        {
+    private function extractAttachmentUrl($response, ?string $responseXml, string $baseUrl): ?string
+    {
+        $location = null;
+        try {
+            $location = $response?->header('Location');
+        } catch (Exception $exception) {
             $location = null;
-            try {
-                $location = $response?->header('Location');
-            } catch (Exception $exception) {
-                $location = null;
-            }
-            if ($location) {
-                return $this->buildAbsoluteUrl($baseUrl, $location);
-            }
+        }
+        if ($location) {
+            return $this->buildAbsoluteUrl($baseUrl, $location);
+        }
 
-            if (!$responseXml) {
-                return null;
-            }
-
-            $decoded = $this->decodeXmlForDisplay($responseXml) ?? $responseXml;
-            $path = (string) (parse_url($baseUrl, PHP_URL_PATH) ?? '');
-            $basePath = rtrim($path, '/');
-
-            if (preg_match('~<href>\s*([^<]+/attachments/\d+)\s*</href>~', $decoded, $matches)) {
-                return $this->buildAbsoluteUrl($baseUrl, $matches[1]);
-            }
-
-            if (preg_match('~/attachments/([0-9]+)~', $decoded, $matches)) {
-                return $this->buildAbsoluteUrl($baseUrl, $matches[0]);
-            }
-
-            if (preg_match('~/TdmAttachmentBL/([0-9]+)~', $decoded, $matches)) {
-                return $this->buildAbsoluteUrl($baseUrl, $basePath . '/' . $matches[1]);
-            }
-
-            if (preg_match('~/TdmPvzAttachmentBL/([0-9]+)~', $decoded, $matches)) {
-                return $this->buildAbsoluteUrl($baseUrl, $basePath . '/' . $matches[1]);
-            }
-
+        if (!$responseXml) {
             return null;
         }
 
-        private function buildAbsoluteUrl(string $baseUrl, string $path): string
-        {
-            if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
-                return $path;
-            }
-            $parts = parse_url($baseUrl);
-            $scheme = $parts['scheme'] ?? 'https';
-            $host = $parts['host'] ?? '';
-            $port = isset($parts['port']) ? ':' . $parts['port'] : '';
-            $path = '/' . ltrim($path, '/');
+        $decoded = $this->decodeXmlForDisplay($responseXml) ?? $responseXml;
+        $path = (string) (parse_url($baseUrl, PHP_URL_PATH) ?? '');
+        $basePath = rtrim($path, '/');
 
-            $basePath = $parts['path'] ?? '';
-            if ($basePath && str_starts_with($path, '/rest/')) {
-                $prefixPos = strpos($basePath, '/rest/');
-                if ($prefixPos !== false) {
-                    $prefix = substr($basePath, 0, $prefixPos);
-                    if ($prefix !== '') {
-                        $path = rtrim($prefix, '/') . $path;
-                    }
-                }
-            }
-
-            return $scheme . '://' . $host . $port . $path;
+        if (preg_match('~<href>\s*([^<]+/attachments/\d+)\s*</href>~', $decoded, $matches)) {
+            return $this->buildAbsoluteUrl($baseUrl, $matches[1]);
         }
 
-        private function normalizeXmlOutput(string $xml): string
+        if (preg_match('~/attachments/([0-9]+)~', $decoded, $matches)) {
+            return $this->buildAbsoluteUrl($baseUrl, $matches[0]);
+        }
+
+        if (preg_match('~/TdmAttachmentBL/([0-9]+)~', $decoded, $matches)) {
+            return $this->buildAbsoluteUrl($baseUrl, $basePath . '/' . $matches[1]);
+        }
+
+        if (preg_match('~/TdmPvzAttachmentBL/([0-9]+)~', $decoded, $matches)) {
+            return $this->buildAbsoluteUrl($baseUrl, $basePath . '/' . $matches[1]);
+        }
+
+        return null;
+    }
+
+    private function buildAbsoluteUrl(string $baseUrl, string $path): string
+    {
+        if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+            return $path;
+        }
+        $parts = parse_url($baseUrl);
+        $scheme = $parts['scheme'] ?? 'https';
+        $host = $parts['host'] ?? '';
+        $port = isset($parts['port']) ? ':' . $parts['port'] : '';
+        $path = '/' . ltrim($path, '/');
+
+        $basePath = $parts['path'] ?? '';
+        if ($basePath && str_starts_with($path, '/rest/')) {
+            $prefixPos = strpos($basePath, '/rest/');
+            if ($prefixPos !== false) {
+                $prefix = substr($basePath, 0, $prefixPos);
+                if ($prefix !== '') {
+                    $path = rtrim($prefix, '/') . $path;
+                }
+            }
+        }
+
+        return $scheme . '://' . $host . $port . $path;
+    }
+
+    private function normalizeXmlOutput(string $xml): string
     {
         if (!str_contains($xml, '<') && str_contains($xml, '&lt;')) {
             return html_entity_decode($xml, ENT_QUOTES | ENT_XML1, 'UTF-8');

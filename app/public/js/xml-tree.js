@@ -490,6 +490,7 @@
     const attachmentPostUrlInput = document.getElementById(
         "attachment_post_url",
     );
+    const attachmentsInput = document.getElementById("attachments");
     const lastUrlKey = "restTool.lastUrl";
     if (urlInput) {
         if (!urlInput.value && localStorage.getItem(lastUrlKey)) {
@@ -514,14 +515,8 @@
         if (!attachmentPostUrlInput.value && localStorage.getItem(lastUrlKey)) {
             attachmentPostUrlInput.value = localStorage.getItem(lastUrlKey);
         }
-        attachmentPostUrlInput.addEventListener("input", () => {
-            localStorage.setItem(lastUrlKey, attachmentPostUrlInput.value);
-            if (generatedXmlArea && attachmentsInput?.files?.length) {
-                generatedXmlArea.value = buildGeneratedXmlPayload();
-            }
-        });
 
-        attachmentPostUrlInput.addEventListener("blur", () => {
+        const normalizeAttachmentPostUrl = () => {
             if (!attachmentPostUrlInput.value) {
                 return;
             }
@@ -534,10 +529,22 @@
                     generatedXmlArea.value = buildGeneratedXmlPayload();
                 }
             }
+        };
+
+        normalizeAttachmentPostUrl();
+
+        attachmentPostUrlInput.addEventListener("input", () => {
+            localStorage.setItem(lastUrlKey, attachmentPostUrlInput.value);
+            if (generatedXmlArea && attachmentsInput?.files?.length) {
+                generatedXmlArea.value = buildGeneratedXmlPayload();
+            }
+        });
+
+        attachmentPostUrlInput.addEventListener("blur", () => {
+            normalizeAttachmentPostUrl();
         });
     }
 
-    const attachmentsInput = document.getElementById("attachments");
     if (attachmentsInput) {
         attachmentsInput.addEventListener("change", () => {
             if (!generatedXmlArea) {
@@ -744,70 +751,71 @@
         });
     }
 
-        function resolveAttachmentsPath(postUrl) {
-                if (!postUrl) {
-                        return "";
-                }
-                let pathname = "";
-                try {
-                        const parsed = new URL(postUrl);
-                        pathname = parsed.pathname || "";
-                } catch (e) {
-                        pathname = postUrl;
-                }
-                const idx = pathname.indexOf("/attachments");
-                if (idx === -1) {
-                    const normalized = pathname.replace(/\/+$/, "");
-                    if (/\/rest\/[^/]+\/[0-9]+$/.test(normalized)) {
-                        return `${normalized}/attachments`;
-                    }
-                    return "";
-                }
-                return pathname.slice(0, idx + "/attachments".length);
+    function resolveAttachmentsPath(postUrl) {
+        if (!postUrl) {
+            return "";
         }
-
-        function formatIsoWithOffset(date) {
-                const pad = (value) => String(value).padStart(2, "0");
-                const year = date.getFullYear();
-                const month = pad(date.getMonth() + 1);
-                const day = pad(date.getDate());
-                const hours = pad(date.getHours());
-                const minutes = pad(date.getMinutes());
-                const seconds = pad(date.getSeconds());
-                const millis = String(date.getMilliseconds()).padStart(3, "0");
-                const offset = -date.getTimezoneOffset();
-                const sign = offset >= 0 ? "+" : "-";
-                const offsetHours = pad(Math.floor(Math.abs(offset) / 60));
-                const offsetMinutes = pad(Math.abs(offset) % 60);
-                return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}.${millis}${sign}${offsetHours}:${offsetMinutes}`;
+        let pathname = "";
+        try {
+            const parsed = new URL(postUrl);
+            pathname = parsed.pathname || "";
+        } catch (e) {
+            pathname = postUrl;
         }
+        const idx = pathname.indexOf("/attachments");
+        if (idx === -1) {
+            const normalized = pathname.replace(/\/+$/, "");
+            if (/\/rest\/[^/]+\/[0-9]+$/.test(normalized)) {
+                return `${normalized}/attachments`;
+            }
+            return "";
+        }
+        return pathname.slice(0, idx + "/attachments".length);
+    }
 
-        function buildAttachmentsXmlTemplate(postUrl) {
-                const attachmentsPath = resolveAttachmentsPath(postUrl);
-                if (!attachmentsPath) {
-                        return "";
-                }
-                const files = attachmentsInput ? attachmentsInput.files || [] : [];
-                if (!files.length) {
-                        return "";
-                }
-                const file = files[0];
-                const storageIdInput = document.getElementById("attachment_storage_id");
-                const authorInput = document.getElementById("attachment_author");
-                const descriptionInput =
-                        document.getElementById("attachment_description");
-                const commentInput = document.getElementById("attachment_comment");
-                const storageId = storageIdInput ? storageIdInput.value.trim() : "";
-                const author = authorInput ? authorInput.value.trim() : "";
-                const description = descriptionInput
-                        ? descriptionInput.value.trim()
-                        : "";
-                const comment = commentInput ? commentInput.value.trim() : "";
-                const now = new Date();
-                const created = formatIsoWithOffset(now);
-                const fileAddTime = now.toISOString().slice(0, 10);
+    function formatIsoWithOffset(date) {
+        const pad = (value) => String(value).padStart(2, "0");
+        const year = date.getFullYear();
+        const month = pad(date.getMonth() + 1);
+        const day = pad(date.getDate());
+        const hours = pad(date.getHours());
+        const minutes = pad(date.getMinutes());
+        const seconds = pad(date.getSeconds());
+        const millis = String(date.getMilliseconds()).padStart(3, "0");
+        const offset = -date.getTimezoneOffset();
+        const sign = offset >= 0 ? "+" : "-";
+        const offsetHours = pad(Math.floor(Math.abs(offset) / 60));
+        const offsetMinutes = pad(Math.abs(offset) % 60);
+        return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}.${millis}${sign}${offsetHours}:${offsetMinutes}`;
+    }
 
-                return `<?xml version="1.0" encoding="UTF-8"?>
+    function buildAttachmentsXmlTemplate(postUrl) {
+        const attachmentsPath = resolveAttachmentsPath(postUrl);
+        if (!attachmentsPath) {
+            return "";
+        }
+        const files = attachmentsInput ? attachmentsInput.files || [] : [];
+        if (!files.length) {
+            return "";
+        }
+        const file = files[0];
+        const storageIdInput = document.getElementById("attachment_storage_id");
+        const authorInput = document.getElementById("attachment_author");
+        const descriptionInput = document.getElementById(
+            "attachment_description",
+        );
+        const commentInput = document.getElementById("attachment_comment");
+        const storageId = storageIdInput ? storageIdInput.value.trim() : "";
+        const author = authorInput ? authorInput.value.trim() : "";
+        const description = descriptionInput
+            ? descriptionInput.value.trim()
+            : "";
+        const comment = commentInput ? commentInput.value.trim() : "";
+        const now = new Date();
+        const created = formatIsoWithOffset(now);
+        const fileAddTime = now.toISOString().slice(0, 10);
+
+        return `<?xml version="1.0" encoding="UTF-8"?>
 <resource>
     <description>Pievienotais fails</description>
     <entity xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
@@ -829,7 +837,7 @@
         <IS_CURRENT/>
     </entity>
 </resource>`;
-        }
+    }
 
     function buildMinimalXmlString() {
         if (!originalXml) {
