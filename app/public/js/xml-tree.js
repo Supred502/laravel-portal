@@ -365,7 +365,7 @@
                 requestXmlField.value = originalXml || "";
             }
             if (generatedXmlArea) {
-                generatedXmlArea.value = buildMinimalXmlString();
+                generatedXmlArea.value = buildGeneratedXmlPayload();
             }
             try {
                 const keys = Object.keys(changeMap);
@@ -487,6 +487,9 @@
 
     const urlInput = document.getElementById("url");
     const postUrlInput = document.getElementById("post_url");
+    const attachmentPostUrlInput = document.getElementById(
+        "attachment_post_url",
+    );
     const lastUrlKey = "restTool.lastUrl";
     if (urlInput) {
         if (!urlInput.value && localStorage.getItem(lastUrlKey)) {
@@ -502,8 +505,67 @@
         }
         postUrlInput.addEventListener("input", () => {
             localStorage.setItem(lastUrlKey, postUrlInput.value);
+            if (generatedXmlArea && attachmentsInput?.files?.length) {
+                generatedXmlArea.value = buildGeneratedXmlPayload();
+            }
         });
     }
+    if (attachmentPostUrlInput) {
+        if (!attachmentPostUrlInput.value && localStorage.getItem(lastUrlKey)) {
+            attachmentPostUrlInput.value = localStorage.getItem(lastUrlKey);
+        }
+        attachmentPostUrlInput.addEventListener("input", () => {
+            localStorage.setItem(lastUrlKey, attachmentPostUrlInput.value);
+            if (generatedXmlArea && attachmentsInput?.files?.length) {
+                generatedXmlArea.value = buildGeneratedXmlPayload();
+            }
+        });
+
+        attachmentPostUrlInput.addEventListener("blur", () => {
+            if (!attachmentPostUrlInput.value) {
+                return;
+            }
+            if (!/\/attachments\/?$/i.test(attachmentPostUrlInput.value)) {
+                attachmentPostUrlInput.value =
+                    attachmentPostUrlInput.value.replace(/\/+$/, "") +
+                    "/attachments";
+                localStorage.setItem(lastUrlKey, attachmentPostUrlInput.value);
+                if (generatedXmlArea && attachmentsInput?.files?.length) {
+                    generatedXmlArea.value = buildGeneratedXmlPayload();
+                }
+            }
+        });
+    }
+
+    const attachmentsInput = document.getElementById("attachments");
+    if (attachmentsInput) {
+        attachmentsInput.addEventListener("change", () => {
+            if (!generatedXmlArea) {
+                return;
+            }
+            const payload = buildGeneratedXmlPayload();
+            if (payload) {
+                generatedXmlArea.value = payload;
+            }
+        });
+    }
+
+    [
+        "attachment_storage_id",
+        "attachment_author",
+        "attachment_description",
+        "attachment_comment",
+    ].forEach((id) => {
+        const input = document.getElementById(id);
+        if (!input) {
+            return;
+        }
+        input.addEventListener("input", () => {
+            if (attachmentsInput?.files?.length && generatedXmlArea) {
+                generatedXmlArea.value = buildGeneratedXmlPayload();
+            }
+        });
+    });
 
     function resizeFormattedXml() {
         if (!formattedXml) {
@@ -631,12 +693,146 @@
         return updated[segment.index - 1];
     }
 
-    function buildMinimalXmlString() {
-        if (!originalXml) {
-            return "";
+    function getElementChildren(node) {
+        return Array.from(node.childNodes || []).filter(
+            (child) => child.nodeType === 1,
+        );
+    }
+
+    function getChildrenByName(node, name) {
+        return getElementChildren(node).filter(
+            (child) => child.nodeName === name,
+        );
+    }
+
+    function cloneElementTree(origNode, doc) {
+        const ns = origNode.namespaceURI;
+        const clone = ns
+            ? doc.createElementNS(ns, origNode.nodeName)
+            : doc.createElement(origNode.nodeName);
+
+        if (origNode.attributes) {
+            Array.from(origNode.attributes).forEach((attr) => {
+                clone.setAttribute(attr.name, attr.value);
+            });
         }
 
-        if (Object.keys(changeMap).length === 0) {
+        const elementChildren = getElementChildren(origNode);
+        if (elementChildren.length === 0) {
+            clone.textContent = origNode.textContent ?? "";
+            return clone;
+        }
+
+        elementChildren.forEach((child) => {
+            clone.appendChild(cloneElementTree(child, doc));
+        });
+
+        return clone;
+    }
+
+    function trimRowFields(tblNode) {
+        if (!tblNode) {
+            return;
+        }
+        const allowed = ["RN", "NPK", "RN_VEIDS", "PK_NOM", "DAUDZ"];
+        getChildrenByName(tblNode, "row").forEach((row) => {
+            getElementChildren(row).forEach((child) => {
+                if (!allowed.includes(child.nodeName)) {
+                    row.removeChild(child);
+                }
+            });
+        });
+    }
+
+        function resolveAttachmentsPath(postUrl) {
+                if (!postUrl) {
+                        return "";
+                }
+                let pathname = "";
+                try {
+                        const parsed = new URL(postUrl);
+                        pathname = parsed.pathname || "";
+                } catch (e) {
+                        pathname = postUrl;
+                }
+                const idx = pathname.indexOf("/attachments");
+                if (idx === -1) {
+                    const normalized = pathname.replace(/\/+$/, "");
+                    if (/\/rest\/[^/]+\/[0-9]+$/.test(normalized)) {
+                        return `${normalized}/attachments`;
+                    }
+                    return "";
+                }
+                return pathname.slice(0, idx + "/attachments".length);
+        }
+
+        function formatIsoWithOffset(date) {
+                const pad = (value) => String(value).padStart(2, "0");
+                const year = date.getFullYear();
+                const month = pad(date.getMonth() + 1);
+                const day = pad(date.getDate());
+                const hours = pad(date.getHours());
+                const minutes = pad(date.getMinutes());
+                const seconds = pad(date.getSeconds());
+                const millis = String(date.getMilliseconds()).padStart(3, "0");
+                const offset = -date.getTimezoneOffset();
+                const sign = offset >= 0 ? "+" : "-";
+                const offsetHours = pad(Math.floor(Math.abs(offset) / 60));
+                const offsetMinutes = pad(Math.abs(offset) % 60);
+                return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}.${millis}${sign}${offsetHours}:${offsetMinutes}`;
+        }
+
+        function buildAttachmentsXmlTemplate(postUrl) {
+                const attachmentsPath = resolveAttachmentsPath(postUrl);
+                if (!attachmentsPath) {
+                        return "";
+                }
+                const files = attachmentsInput ? attachmentsInput.files || [] : [];
+                if (!files.length) {
+                        return "";
+                }
+                const file = files[0];
+                const storageIdInput = document.getElementById("attachment_storage_id");
+                const authorInput = document.getElementById("attachment_author");
+                const descriptionInput =
+                        document.getElementById("attachment_description");
+                const commentInput = document.getElementById("attachment_comment");
+                const storageId = storageIdInput ? storageIdInput.value.trim() : "";
+                const author = authorInput ? authorInput.value.trim() : "";
+                const description = descriptionInput
+                        ? descriptionInput.value.trim()
+                        : "";
+                const comment = commentInput ? commentInput.value.trim() : "";
+                const now = new Date();
+                const created = formatIsoWithOffset(now);
+                const fileAddTime = now.toISOString().slice(0, 10);
+
+                return `<?xml version="1.0" encoding="UTF-8"?>
+<resource>
+    <description>Pievienotais fails</description>
+    <entity xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+        <PK_STORAGE>
+            <href>/rest/TdmStorageBL/${storageId || "3"}</href>
+        </PK_STORAGE>
+        <FILENAME>${file.name}</FILENAME>
+        <AUTHOR>${author}</AUTHOR>
+        <CREATED>${created}</CREATED>
+        <KOMENTARS>${comment}</KOMENTARS>
+        <PK_REPNOM/>
+        <PK_RPDGRP/>
+        <APRAKSTS>${description}</APRAKSTS>
+        <FILE_ADD_TIME>${fileAddTime}</FILE_ADD_TIME>
+        <CSADCREATED/>
+        <DIGITSIGN/>
+        <SKSTATUSS/>
+        <IS_SASK/>
+        <IS_CURRENT/>
+    </entity>
+</resource>`;
+        }
+
+    function buildMinimalXmlString() {
+        if (!originalXml) {
             return "";
         }
 
@@ -650,6 +846,9 @@
         }
 
         const root = originalDoc.documentElement;
+        if (!root) {
+            return "";
+        }
         const minimalDoc = document.implementation.createDocument(
             root.namespaceURI,
             root.nodeName,
@@ -659,6 +858,56 @@
         Array.from(root.attributes || []).forEach((attr) => {
             minimalRoot.setAttribute(attr.name, attr.value);
         });
+
+        const entityNode =
+            root.nodeName === "entity"
+                ? root
+                : getChildrenByName(root, "entity")[0] || null;
+        let minimalEntity = null;
+        if (entityNode) {
+            if (root.nodeName === "entity") {
+                minimalEntity = minimalRoot;
+                Array.from(entityNode.attributes || []).forEach((attr) => {
+                    minimalEntity.setAttribute(attr.name, attr.value);
+                });
+            } else {
+                minimalEntity = cloneElementTree(entityNode, minimalDoc);
+                minimalRoot.appendChild(minimalEntity);
+            }
+
+            const requiredNames = [
+                "PK_DOKT",
+                "PK_DOK",
+                "COUNTER",
+                "PK_ESPATS",
+                "PK_KLIENTS",
+                "DOK_NR",
+                "tblRindas",
+            ];
+
+            getElementChildren(minimalEntity).forEach((child) => {
+                if (!requiredNames.includes(child.nodeName)) {
+                    minimalEntity.removeChild(child);
+                }
+            });
+
+            requiredNames.forEach((name) => {
+                const existing = getChildrenByName(minimalEntity, name);
+                if (existing.length > 0) {
+                    return;
+                }
+                const originals = getChildrenByName(entityNode, name);
+                originals.forEach((origChild) => {
+                    minimalEntity.appendChild(
+                        cloneElementTree(origChild, minimalDoc),
+                    );
+                });
+            });
+
+            getChildrenByName(minimalEntity, "tblRindas").forEach((tbl) => {
+                trimRowFields(tbl);
+            });
+        }
 
         Object.keys(changeMap).forEach((path) => {
             const segments = parsePathSegments(path);
@@ -693,11 +942,20 @@
         return serializer.serializeToString(minimalDoc);
     }
 
+    function buildGeneratedXmlPayload() {
+        const urlValue = postUrlInput?.value?.trim()
+            ? postUrlInput.value.trim()
+            : attachmentPostUrlInput?.value?.trim() || "";
+        const attachmentsXml = buildAttachmentsXmlTemplate(urlValue);
+        const payload = attachmentsXml || buildMinimalXmlString();
+        return payload ? formatXmlString(payload) : "";
+    }
+
     function generateMinimalXml() {
         if (!generatedXmlArea) {
             return;
         }
-        generatedXmlArea.value = buildMinimalXmlString();
+        generatedXmlArea.value = buildGeneratedXmlPayload();
     }
 
     const generateButton = document.getElementById("generate-minimal-xml");

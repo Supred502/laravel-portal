@@ -8,7 +8,9 @@ use DOMElement;
 use Exception;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Carbon;
 
 class RestToolController extends Controller
 {
@@ -189,6 +191,11 @@ class RestToolController extends Controller
             'remember_auth' => ['nullable', 'boolean'],
             'generated_xml' => ['nullable', 'string'],
             'request_xml' => ['nullable', 'string'],
+            'attachment_storage_id' => ['nullable', 'integer', 'min:1'],
+            'attachment_author' => ['nullable', 'string', 'max:255'],
+            'attachment_description' => ['nullable', 'string', 'max:255'],
+            'attachment_comment' => ['nullable', 'string', 'max:255'],
+            'attachments' => ['nullable', 'array', 'max:1'],
             'attachments.*' => ['nullable', 'file', 'mimetypes:application/pdf', 'max:10240'],
         ]);
 
@@ -221,18 +228,8 @@ class RestToolController extends Controller
             session()->put('rest_tool.remember_auth', false);
         }
 
-        $xmlPayload = $validator->validated()['generated_xml'] ?: $validator->validated()['request_xml'];
-        if (!$xmlPayload) {
-            return redirect()->route('rest-tool.index')
-                ->with('rest_tool.post_error', 'No XML to send.')
-                ->withInput();
-        }
-
-        if (strlen($xmlPayload) > 2 * 1024 * 1024) {
-            return redirect()->route('rest-tool.index')
-                ->with('rest_tool.post_error', 'XML payload exceeds 2MB limit.')
-                ->withInput();
-        }
+        $validated = $validator->validated();
+        $xmlPayload = $validated['generated_xml'] ?? $validated['request_xml'] ?? null;
 
         $statusCode = null;
         $responseXml = null;
@@ -246,30 +243,79 @@ class RestToolController extends Controller
             }
 
             $attachments = $request->file('attachments', []);
-            if (!empty($attachments)) {
-                $client = $client->asMultipart();
-                $client = $client->attach('xml', $xmlPayload, 'request.xml');
-                foreach ($attachments as $file) {
-                    $client = $client->attach(
-                        'files[]',
-                        file_get_contents($file->getRealPath()),
-                        $file->getClientOriginalName(),
-                        ['Content-Type' => $file->getClientMimeType()]
-                    );
-                }
-                $response = $client->post($postUrl);
-            } else {
-                $response = $client->withBody($xmlPayload, 'application/xml')->post($postUrl);
+            $path = (string) (parse_url($postUrl, PHP_URL_PATH) ?? '');
+            $isAttachmentsEndpoint = str_contains($path, '/attachments');
+
+            if (!$isAttachmentsEndpoint && !$xmlPayload) {
+                return redirect()->route('rest-tool.index')
+                    ->with('rest_tool.post_error', 'No XML to send.')
+                    ->withInput();
             }
 
-            $statusCode = $response->status();
-            $responseXml = $response->body();
+            if ($xmlPayload && strlen($xmlPayload) > 2 * 1024 * 1024) {
+                return redirect()->route('rest-tool.index')
+                    ->with('rest_tool.post_error', 'XML payload exceeds 2MB limit.')
+                    ->withInput();
+            }
+
+            if (!empty($attachments) && !$isAttachmentsEndpoint) {
+                return redirect()->route('rest-tool.index')
+                    ->with('rest_tool.post_error', 'Use an /attachments URL to upload PDF files.')
+                    ->withInput();
+            }
+
+            if ($isAttachmentsEndpoint) {
+                if (empty($attachments)) {
+                    return redirect()->route('rest-tool.index')
+                        ->with('rest_tool.post_error', 'Select a PDF file for attachments.')
+                        ->withInput();
+                }
+
+                $storageId = $validated['attachment_storage_id'] ?? null;
+                if (!$storageId) {
+                    return redirect()->route('rest-tool.index')
+                        ->with('rest_tool.post_error', 'Storage ID is required for attachments.')
+                        ->withInput();
+                }
+                $author = $validated['attachment_author']
+                    ?? $validated['auth_username']
+                    ?? null;
+                $description = $validated['attachment_description'] ?? null;
+                $comment = $validated['attachment_comment'] ?? null;
+                $xmlPayload = $this->buildAttachmentXml(
+                    $attachments[0],
+                    $storageId,
+                    $author,
+                    $description,
+                    $comment
+                );
+
+                $metaResponse = $client
+                    ->withBody($xmlPayload, 'application/xml')
+                    ->post($postUrl);
+
+                $statusCode = $metaResponse->status();
+                $metaResponseXml = $metaResponse->body();
+                $responseXml = $metaResponseXml;
+                $success = $metaResponse->successful();
+                if (!$success) {
+                    $postError = 'Request failed with status ' . $statusCode . '. Response: ' . $this->truncate($responseXml ?? '');
+                    throw new Exception($postError);
+                }
+
+                $responseXml = $metaResponseXml;
+            } else {
+                $response = $client->withBody($xmlPayload, 'application/xml')->post($postUrl);
+                $statusCode = $response->status();
+                $responseXml = $response->body();
+                $success = $response->successful();
+                if (!$success) {
+                    $postError = 'Request failed with status ' . $statusCode . '. Response: ' . $this->truncate($responseXml ?? '');
+                }
+            }
+
             if ($responseXml && strlen($responseXml) > 2 * 1024 * 1024) {
                 throw new Exception('Response XML exceeds 2MB limit.');
-            }
-            $success = $response->successful();
-            if (!$success) {
-                $postError = 'Request failed with status ' . $statusCode . '. Response: ' . $this->truncate($responseXml ?? '');
             }
         } catch (Exception $exception) {
             $postError = $exception->getMessage();
@@ -285,18 +331,23 @@ class RestToolController extends Controller
             }
         }
 
-        $log = RestActionLog::create([
+        $logData = [
             'user_id' => $request->user()->id,
             'method' => 'POST',
             'url' => $postUrl,
             'status_code' => $statusCode,
             'success' => $success,
             'request_xml' => $xmlPayload,
-            'base_request_xml' => $validator->validated()['request_xml'] ?? null,
             'response_xml' => $responseXml,
             'error_message' => $postError,
             'auth_username' => $username,
-        ]);
+        ];
+
+        if (Schema::hasColumn('rest_action_logs', 'base_request_xml')) {
+            $logData['base_request_xml'] = $validator->validated()['request_xml'] ?? null;
+        }
+
+        $log = RestActionLog::create($logData);
 
         session()->flash('rest_tool.post_status', $statusCode ? 'POST ' . $statusCode : 'POST failed');
         session()->flash('rest_tool.post_error', $postError);
@@ -375,6 +426,7 @@ class RestToolController extends Controller
     private function parseXml(string $xml): array
     {
         $xml = $this->normalizeXmlInput($xml);
+        $skipDetails = strlen($xml) > 300000;
         $dom = new DOMDocument('1.0', 'UTF-8');
         $dom->preserveWhiteSpace = false;
         $dom->formatOutput = true;
@@ -393,8 +445,8 @@ class RestToolController extends Controller
                 $formatted = $decoded;
             }
         }
-        $tree = $this->buildTree($dom->documentElement);
-        $rows = $this->extractRepeatingRows($dom->documentElement);
+        $tree = $skipDetails ? null : $this->buildTree($dom->documentElement);
+        $rows = $skipDetails ? [] : $this->extractRepeatingRows($dom->documentElement);
 
         return [
             'formatted' => $formatted,
@@ -628,7 +680,130 @@ class RestToolController extends Controller
         return mb_substr($value, 0, $limit) . '…';
     }
 
-    private function normalizeXmlOutput(string $xml): string
+        private function buildAttachmentXml($file, int $storageId, ?string $author, ?string $description, ?string $comment): string
+        {
+                $filename = method_exists($file, 'getClientOriginalName')
+                        ? $file->getClientOriginalName()
+                        : (string) ($file['name'] ?? 'attachment.pdf');
+
+            $fileContents = method_exists($file, 'getRealPath')
+                ? file_get_contents($file->getRealPath())
+                : null;
+            $fileContents = $fileContents === false ? null : $fileContents;
+            $fileSizeBytes = $fileContents !== null ? strlen($fileContents) : 0;
+            $fileSizeKb = $fileSizeBytes > 0 ? (int) ceil($fileSizeBytes / 1024) : 0;
+            $fileData = $fileContents !== null ? base64_encode($fileContents) : '';
+
+                $now = Carbon::now();
+                $created = $now->format('Y-m-d\TH:i:s.vP');
+                $fileAddTime = $now->format('Y-m-d');
+
+                $author = $author ?: '';
+                $description = $description ?: '';
+                $comment = $comment ?: '';
+
+                $xml = <<<XML
+<?xml version="1.0" encoding="UTF-8"?>
+<resource>
+    <description>Pievienotais fails</description>
+    <entity xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+        <PK_STORAGE>
+            <href>/rest/TdmStorageBL/{$storageId}</href>
+        </PK_STORAGE>
+        <FILENAME>{$this->escapeXml($filename)}</FILENAME>
+        <AUTHOR>{$this->escapeXml($author)}</AUTHOR>
+        <CREATED>{$created}</CREATED>
+        <KOMENTARS>{$this->escapeXml($comment)}</KOMENTARS>
+        <FILSIZE>
+            <size>{$fileSizeKb}</size>
+            <data>{$fileData}</data>
+        </FILSIZE>
+        <PK_REPNOM/>
+        <PK_RPDGRP/>
+        <APRAKSTS>{$this->escapeXml($description)}</APRAKSTS>
+        <FILE_ADD_TIME>{$fileAddTime}</FILE_ADD_TIME>
+        <CSADCREATED/>
+        <DIGITSIGN/>
+        <SKSTATUSS/>
+        <IS_SASK/>
+        <IS_CURRENT/>
+    </entity>
+</resource>
+XML;
+
+                return $xml;
+        }
+
+        private function escapeXml(string $value): string
+        {
+                return htmlspecialchars($value, ENT_QUOTES | ENT_XML1, 'UTF-8');
+        }
+
+        private function extractAttachmentUrl($response, ?string $responseXml, string $baseUrl): ?string
+        {
+            $location = null;
+            try {
+                $location = $response?->header('Location');
+            } catch (Exception $exception) {
+                $location = null;
+            }
+            if ($location) {
+                return $this->buildAbsoluteUrl($baseUrl, $location);
+            }
+
+            if (!$responseXml) {
+                return null;
+            }
+
+            $decoded = $this->decodeXmlForDisplay($responseXml) ?? $responseXml;
+            $path = (string) (parse_url($baseUrl, PHP_URL_PATH) ?? '');
+            $basePath = rtrim($path, '/');
+
+            if (preg_match('~<href>\s*([^<]+/attachments/\d+)\s*</href>~', $decoded, $matches)) {
+                return $this->buildAbsoluteUrl($baseUrl, $matches[1]);
+            }
+
+            if (preg_match('~/attachments/([0-9]+)~', $decoded, $matches)) {
+                return $this->buildAbsoluteUrl($baseUrl, $matches[0]);
+            }
+
+            if (preg_match('~/TdmAttachmentBL/([0-9]+)~', $decoded, $matches)) {
+                return $this->buildAbsoluteUrl($baseUrl, $basePath . '/' . $matches[1]);
+            }
+
+            if (preg_match('~/TdmPvzAttachmentBL/([0-9]+)~', $decoded, $matches)) {
+                return $this->buildAbsoluteUrl($baseUrl, $basePath . '/' . $matches[1]);
+            }
+
+            return null;
+        }
+
+        private function buildAbsoluteUrl(string $baseUrl, string $path): string
+        {
+            if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+                return $path;
+            }
+            $parts = parse_url($baseUrl);
+            $scheme = $parts['scheme'] ?? 'https';
+            $host = $parts['host'] ?? '';
+            $port = isset($parts['port']) ? ':' . $parts['port'] : '';
+            $path = '/' . ltrim($path, '/');
+
+            $basePath = $parts['path'] ?? '';
+            if ($basePath && str_starts_with($path, '/rest/')) {
+                $prefixPos = strpos($basePath, '/rest/');
+                if ($prefixPos !== false) {
+                    $prefix = substr($basePath, 0, $prefixPos);
+                    if ($prefix !== '') {
+                        $path = rtrim($prefix, '/') . $path;
+                    }
+                }
+            }
+
+            return $scheme . '://' . $host . $port . $path;
+        }
+
+        private function normalizeXmlOutput(string $xml): string
     {
         if (!str_contains($xml, '<') && str_contains($xml, '&lt;')) {
             return html_entity_decode($xml, ENT_QUOTES | ENT_XML1, 'UTF-8');

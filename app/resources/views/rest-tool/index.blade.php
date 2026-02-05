@@ -26,7 +26,7 @@
                         <form method="POST" action="{{ route('rest-tool.fetch') }}" class="space-y-4">
                             @csrf
 
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div class="space-y-4">
                                 <div>
                                     <x-input-label for="url" value="REST URL" />
                                     <x-text-input id="url" name="url" type="url" class="mt-1 block w-full"
@@ -110,6 +110,8 @@
                                 class="bg-gray-50 border border-gray-200 rounded-md p-3 text-sm font-mono leading-relaxed overflow-auto h-96 xml-tree">
                                 @include('partials.xml-tree', ['node' => $xmlTree, 'isRoot' => true])
                             </div>
+                        @elseif ($xmlFormatted)
+                            <div class="text-sm text-gray-500">XML is large; tree view is disabled for performance.</div>
                         @else
                             <div class="text-sm text-gray-500">Fetch XML to view the tree.</div>
                         @endif
@@ -244,10 +246,10 @@
 
                     <div class="panel-body mt-4" data-panel-body="post-panel">
                         <form id="post-xml-form" method="POST" action="{{ route('rest-tool.post') }}"
-                            enctype="multipart/form-data" class="space-y-4">
+                            class="space-y-4">
                             @csrf
 
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div class="space-y-4">
                                 <div>
                                     <x-input-label for="post_url" value="POST URL" />
                                     <x-text-input id="post_url" name="post_url" type="url" class="mt-1 block w-full"
@@ -272,20 +274,6 @@
                                     <label for="post_remember_auth" class="text-sm text-gray-600">Remember username and
                                         password</label>
                                 </div>
-                            </div>
-
-                            <div>
-                                <x-input-label for="attachments" value="File Uploads (PDF)" />
-                                <div class="mt-1 flex flex-wrap items-center gap-3">
-                                    <input id="attachments" name="attachments[]" type="file" class="sr-only" multiple
-                                        accept="application/pdf" />
-                                    <label for="attachments"
-                                        class="inline-flex items-center px-4 py-2 bg-gray-800 border border-transparent rounded-md font-semibold text-xs text-white uppercase tracking-widest hover:bg-gray-700 focus:bg-gray-700 active:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition ease-in-out duration-150 cursor-pointer">
-                                        Choose Files
-                                    </label>
-                                    <span id="attachments-filename" class="text-xs text-gray-500">No file chosen</span>
-                                </div>
-                                <p class="text-xs text-gray-500 mt-1">PDF files only. Maximum 10MB each.</p>
                             </div>
 
                             <textarea id="request-xml" name="request_xml"
@@ -321,6 +309,95 @@
                     </div>
                 </div>
             </div>
+
+            <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg" data-panel-id="attachments-panel">
+                <div class="p-6">
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-lg font-semibold text-gray-800">Attachment Upload</h3>
+                        <button type="button" class="panel-toggle text-sm text-gray-500 hover:text-gray-700"
+                            data-panel-toggle="attachments-panel">
+                            Toggle
+                        </button>
+                    </div>
+
+                    <div class="panel-body mt-4" data-panel-body="attachments-panel">
+                        <form id="attachment-upload-form" method="POST" action="{{ route('rest-tool.post') }}"
+                            enctype="multipart/form-data" class="space-y-4">
+                            @csrf
+
+                            <div class="space-y-4">
+                                <div>
+                                    <x-input-label for="attachment_post_url" value="Attachment POST URL" />
+                                    <x-text-input id="attachment_post_url" name="post_url" type="url"
+                                        class="mt-1 block w-full"
+                                        value="{{ old('post_url', $rememberedUrl) }}" required />
+                                    <p class="text-xs text-gray-500 mt-1">/attachments is appended automatically.</p>
+                                </div>
+                                <div>
+                                    <x-input-label for="attachment_auth_username" value="Username" />
+                                    <x-text-input id="attachment_auth_username" name="auth_username" type="text"
+                                        class="mt-1 block w-full"
+                                        value="{{ old('auth_username', $rememberedAuthUsername) }}" />
+                                </div>
+                                <div>
+                                    <x-input-label for="attachment_auth_password" value="Password" />
+                                    <x-text-input id="attachment_auth_password" name="auth_password" type="password"
+                                        class="mt-1 block w-full" autocomplete="new-password"
+                                        value="{{ old('auth_password', $rememberedAuthPassword) }}" />
+                                </div>
+                                <div class="flex items-center gap-2 mt-2 mb-2 md:col-span-2">
+                                    <input id="attachment_remember_auth" name="remember_auth" type="checkbox" value="1"
+                                        class="rounded border-gray-300 text-indigo-600 shadow-sm" {{ old('remember_auth', $rememberAuth) ? 'checked' : '' }}>
+                                    <label for="attachment_remember_auth" class="text-sm text-gray-600">Remember username and
+                                        password</label>
+                                </div>
+                            </div>
+
+                            <div>
+                                <x-input-label for="attachments" value="File Upload (PDF)" />
+                                <div class="mt-1 flex flex-wrap items-center gap-3">
+                                    <input id="attachments" name="attachments[]" type="file" class="sr-only" multiple
+                                        accept="application/pdf" />
+                                    <label for="attachments"
+                                        class="inline-flex items-center px-4 py-2 bg-gray-800 border border-transparent rounded-md font-semibold text-xs text-white uppercase tracking-widest hover:bg-gray-700 focus:bg-gray-700 active:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 transition ease-in-out duration-150 cursor-pointer">
+                                        Choose Files
+                                    </label>
+                                    <span id="attachments-filename" class="text-xs text-gray-500">No file chosen</span>
+                                </div>
+                                <p class="text-xs text-gray-500 mt-1">PDF files only. Maximum 10MB each.</p>
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-4">
+                                <div>
+                                    <x-input-label for="attachment_storage_id" value="Storage ID" />
+                                    <x-text-input id="attachment_storage_id" name="attachment_storage_id" type="number"
+                                        class="mt-1 block w-full" min="1" value="{{ old('attachment_storage_id', 3) }}" />
+                                </div>
+                                <div>
+                                    <x-input-label for="attachment_author" value="Author" />
+                                    <x-text-input id="attachment_author" name="attachment_author" type="text"
+                                        class="mt-1 block w-full"
+                                        value="{{ old('attachment_author', $rememberedAuthUsername) }}" />
+                                </div>
+                                <div>
+                                    <x-input-label for="attachment_description" value="Description" />
+                                    <x-text-input id="attachment_description" name="attachment_description" type="text"
+                                        class="mt-1 block w-full" value="{{ old('attachment_description') }}" />
+                                </div>
+                                <div>
+                                    <x-input-label for="attachment_comment" value="Comment" />
+                                    <x-text-input id="attachment_comment" name="attachment_comment" type="text"
+                                        class="mt-1 block w-full" value="{{ old('attachment_comment') }}" />
+                                </div>
+                            </div>
+
+                            <div class="flex items-center gap-3">
+                                <x-primary-button>Upload PDF</x-primary-button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -352,6 +429,9 @@
         const attachmentsInput = document.getElementById("attachments");
         const attachmentsName = document.getElementById("attachments-filename");
         if (attachmentsInput && attachmentsName) {
+            attachmentsInput.addEventListener("click", () => {
+                attachmentsInput.value = "";
+            });
             attachmentsInput.addEventListener("change", () => {
                 const files = attachmentsInput.files || [];
                 if (!files.length) {
