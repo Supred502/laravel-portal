@@ -9,3 +9,6 @@ chmod +x setup.sh
 
 -- setup.bat (Windows)
 Double click .bat file
+
+The setup script installs npm packages and builds Vite assets inside the app container.
+If the build fails, the app will error with a missing Vite manifest at public/build/manifest.json.
