@@ -250,6 +250,100 @@
         renderChangeTracker();
         saveChangeMap();
         updateFormattedXmlFromChanges();
+        updateApzimkopIfNeeded(path);
+    }
+
+    let originalDocCache = null;
+
+    function getOriginalDoc() {
+        if (originalDocCache) {
+            return originalDocCache;
+        }
+        if (!originalXml) {
+            return null;
+        }
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(originalXml, "application/xml");
+        if (doc.querySelector("parsererror")) {
+            return null;
+        }
+        originalDocCache = doc;
+        return doc;
+    }
+
+    function getNodeByPath(doc, path) {
+        if (!doc || !path) {
+            return null;
+        }
+        const segments = parsePathSegments(path);
+        if (segments.length === 0) {
+            return null;
+        }
+        const root = doc.documentElement;
+        if (!root || segments[0].name !== root.nodeName) {
+            return null;
+        }
+        let node = root;
+        for (let i = 1; i < segments.length; i += 1) {
+            node = getNthChild(node, segments[i].name, segments[i].index);
+            if (!node) {
+                return null;
+            }
+        }
+        return node;
+    }
+
+    function getValueByPath(path) {
+        if (!path) {
+            return "";
+        }
+        if (changeMap[path]) {
+            return changeMap[path].value ?? "";
+        }
+        const doc = getOriginalDoc();
+        const node = getNodeByPath(doc, path);
+        return node ? node.textContent || "" : "";
+    }
+
+    function getOriginalValueByPath(path) {
+        if (!path) {
+            return "";
+        }
+        const doc = getOriginalDoc();
+        const node = getNodeByPath(doc, path);
+        return node ? node.textContent || "" : "";
+    }
+
+    function updateChangeInternal(path, value) {
+        const original = getOriginalValueByPath(path);
+        if (value === original || value === "") {
+            delete changeMap[path];
+        } else {
+            changeMap[path] = { original, value };
+        }
+    }
+
+    function updateApzimkopIfNeeded(path) {
+        if (!path) {
+            return;
+        }
+        const match = path.match(/\/(KADTER|KADGRUPA|ZEMENR|ZDBUVENR)\[\d+\]$/);
+        if (!match) {
+            return;
+        }
+        const basePath = path.replace(/\/(KADTER|KADGRUPA|ZEMENR|ZDBUVENR)\[\d+\]$/, "");
+        const apzimkopPath = `${basePath}/APZIMKOP[1]`;
+        const kadter = getValueByPath(`${basePath}/KADTER[1]`);
+        const kadgrupa = getValueByPath(`${basePath}/KADGRUPA[1]`);
+        const zemenr = getValueByPath(`${basePath}/ZEMENR[1]`);
+        const zdbuvenr = getValueByPath(`${basePath}/ZDBUVENR[1]`);
+        const apzimkopValue = `${kadter}${kadgrupa}${zemenr}${zdbuvenr}`;
+
+        updateChangeInternal(apzimkopPath, apzimkopValue);
+        renderChangeTracker();
+        saveChangeMap();
+        applyChangesToInputs();
+        updateFormattedXmlFromChanges();
     }
 
     document.addEventListener("input", (event) => {
@@ -886,11 +980,25 @@
             const requiredNames = [
                 "PK_DOKT",
                 "PK_DOK",
+                "PK_OBJ",
                 "COUNTER",
                 "PK_ESPATS",
                 "PK_KLIENTS",
+                "ADRESE",
                 "DOK_NR",
                 "tblRindas",
+            ];
+
+            const requiredDmPnsFields = [
+                "KADTER",
+                "KADGRUPA",
+                "ZEMENR",
+                "ZDBUVENR",
+                "TGNR",
+                "APZIMKOP",
+                "PILNADRESE",
+                "PK_ADR2",
+                "PK_ADR",
             ];
 
             getElementChildren(minimalEntity).forEach((child) => {
@@ -911,6 +1019,37 @@
                     );
                 });
             });
+
+            const originalObjNode =
+                getChildrenByName(entityNode, "DmPNSObjMBL")[0] || null;
+            let minimalObjNode =
+                getChildrenByName(minimalEntity, "DmPNSObjMBL")[0] || null;
+
+            if (!minimalObjNode && originalObjNode) {
+                minimalObjNode = cloneElementTree(originalObjNode, minimalDoc);
+                minimalEntity.appendChild(minimalObjNode);
+            }
+
+            if (minimalObjNode && originalObjNode) {
+                getElementChildren(minimalObjNode).forEach((child) => {
+                    if (!requiredDmPnsFields.includes(child.nodeName)) {
+                        minimalObjNode.removeChild(child);
+                    }
+                });
+
+                requiredDmPnsFields.forEach((name) => {
+                    const existing = getChildrenByName(minimalObjNode, name);
+                    if (existing.length > 0) {
+                        return;
+                    }
+                    const originals = getChildrenByName(originalObjNode, name);
+                    originals.forEach((origChild) => {
+                        minimalObjNode.appendChild(
+                            cloneElementTree(origChild, minimalDoc),
+                        );
+                    });
+                });
+            }
 
             getChildrenByName(minimalEntity, "tblRindas").forEach((tbl) => {
                 trimRowFields(tbl);

@@ -21,6 +21,7 @@ class RestToolController extends Controller
         $xmlFormatted = null;
         $xmlTree = null;
         $xmlRows = [];
+        $keyFields = [];
 
         $fetchStatus = session('rest_tool.fetch_status');
         $fetchError = session('rest_tool.fetch_error');
@@ -77,10 +78,12 @@ class RestToolController extends Controller
                 $xmlFormatted = $parsed['formatted'];
                 $xmlTree = $parsed['tree'];
                 $xmlRows = $parsed['rows'];
+                $keyFields = $parsed['keyFields'] ?? [];
             } catch (Exception $exception) {
                 $xmlFormatted = null;
                 $xmlTree = null;
                 $xmlRows = [];
+                $keyFields = [];
             }
         }
 
@@ -89,6 +92,7 @@ class RestToolController extends Controller
             'xmlFormatted' => $xmlFormatted,
             'xmlTree' => $xmlTree,
             'xmlRows' => $xmlRows,
+            'keyFields' => $keyFields,
             'fetchStatus' => $fetchStatus,
             'fetchError' => $fetchError,
             'postStatus' => $postStatus,
@@ -516,12 +520,49 @@ class RestToolController extends Controller
         }
         $tree = $skipDetails ? null : $this->buildTree($dom->documentElement);
         $rows = $skipDetails ? [] : $this->extractRepeatingRows($dom->documentElement);
+        $keyFields = $skipDetails ? [] : $this->extractKeyFields($dom);
 
         return [
             'formatted' => $formatted,
             'tree' => $tree,
             'rows' => $rows,
+            'keyFields' => $keyFields,
         ];
+    }
+
+    private function extractKeyFields(DOMDocument $dom): array
+    {
+        $targets = [
+            'KADTER',
+            'KADGRUPA',
+            'ZEMENR',
+            'ZDBUVENR',
+            'TGNR',
+            'APZIMKOP',
+            'ADRESE',
+            'PILNADRESE',
+        ];
+        $fields = [];
+        $xpath = new \DOMXPath($dom);
+
+        foreach ($targets as $name) {
+            $nodes = $xpath->query('//*[local-name()="' . $name . '"]');
+            if (!$nodes) {
+                continue;
+            }
+            foreach ($nodes as $node) {
+                if (!$node instanceof DOMElement) {
+                    continue;
+                }
+                $fields[] = [
+                    'name' => $name,
+                    'value' => trim($node->textContent ?? ''),
+                    'path' => $this->getElementPath($node),
+                ];
+            }
+        }
+
+        return $fields;
     }
 
     private function buildTree(DOMElement $element): array

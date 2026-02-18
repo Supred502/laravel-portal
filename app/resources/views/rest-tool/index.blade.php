@@ -130,6 +130,39 @@
                     </div>
 
                     <div class="panel-body mt-4" data-panel-body="extracted-data">
+                        @if (!empty($keyFields))
+                            <div class="mb-6">
+                                <h4 class="text-sm font-semibold text-gray-600 mb-2">Key Fields</h4>
+                                <div class="overflow-auto" style="overflow-x: auto;">
+                                    <table class="text-sm text-left" style="min-width: max-content;">
+                                        <thead class="text-xs uppercase text-gray-500 border-b">
+                                            <tr>
+                                                <th class="py-2 px-3">Field</th>
+                                                <th class="py-2 px-3">Value</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody class="divide-y">
+                                            @foreach ($keyFields as $field)
+                                                <tr>
+                                                    <td class="py-2 px-3 text-gray-600 font-medium">
+                                                        {{ $field['name'] }}
+                                                    </td>
+                                                    <td class="py-2 px-3">
+                                                        <span class="xml-table-value xml-node-value xml-edit-input"
+                                                            contenteditable="true" title="{{ $field['value'] ?? '' }}"
+                                                            data-placeholder="(empty)"
+                                                            style="display:inline-block;min-width:8rem;min-height:2rem;padding:0.25rem 0.5rem;border:1px solid #d1d5db;border-radius:0.375rem;background:#fff;box-shadow:inset 0 1px 2px rgba(0,0,0,.06),0 1px 2px rgba(15,23,42,.06);"
+                                                            @if (!empty($field['path'])) data-path="{{ $field['path'] }}" data-original="{{ e($field['value'] ?? '') }}"
+                                                            @else data-disabled="true" @endif>{{ $field['value'] ?? '' }}</span>
+                                                    </td>
+                                                </tr>
+                                            @endforeach
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        @endif
+
                         @if (!empty($xmlRows))
                             @foreach ($xmlRows as $groupIndex => $group)
                                 <div class="mb-6">
