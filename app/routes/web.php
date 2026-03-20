@@ -20,6 +20,8 @@ Route::middleware('auth')->group(function () {
     Route::get('/rest-tool', [RestToolController::class, 'index'])->name('rest-tool.index');
     Route::post('/rest-tool/fetch', [RestToolController::class, 'fetch'])->name('rest-tool.fetch');
     Route::post('/rest-tool/post', [RestToolController::class, 'postXml'])->name('rest-tool.post');
+    Route::post('/rest-tool/buves/load', [RestToolController::class, 'loadBuves'])->name('rest-tool.buves.load');
+    Route::post('/rest-tool/buves/update', [RestToolController::class, 'updateBuves'])->name('rest-tool.buves.update');
     Route::get('/rest-tool/logs', [RestToolController::class, 'logs'])->name('rest-tool.logs');
     Route::get('/rest-tool/logs/{id}', [RestToolController::class, 'logShow'])->name('rest-tool.logs.show');
 });

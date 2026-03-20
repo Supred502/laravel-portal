@@ -23,7 +23,7 @@
                     </div>
 
                     <div class="panel-body mt-4" data-panel-body="url-auth">
-                        <form method="POST" action="{{ route('rest-tool.fetch') }}" class="space-y-4">
+                        <form id="fetch-xml-form" method="POST" action="{{ route('rest-tool.fetch') }}" class="space-y-4">
                             @csrf
 
                             <div class="space-y-4">
@@ -54,7 +54,7 @@
                             </div>
 
                             <div class="flex items-center gap-3">
-                                <x-primary-button>Fetch XML</x-primary-button>
+                                <x-primary-button id="fetch-xml-submit">Fetch XML</x-primary-button>
                                 @if ($fetchStatus)
                                     <span class="text-sm text-gray-600">{{ $fetchStatus }}</span>
                                 @endif
@@ -66,6 +66,23 @@
                                 </div>
                             @endif
                         </form>
+
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg" data-panel-id="buve-tools">
+                <div class="p-6">
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-lg font-semibold text-gray-800">Būve</h3>
+                        <button type="button" class="panel-toggle text-sm text-gray-500 hover:text-gray-700"
+                            data-panel-toggle="buve-tools">
+                            Toggle
+                        </button>
+                    </div>
+
+                    <div class="panel-body mt-4" data-panel-body="buve-tools">
+                        @include('rest-tool.partials.buve-manager')
                     </div>
                 </div>
             </div>
@@ -313,7 +330,7 @@
                                 class="hidden">{{ e($xmlRaw ?? '') }}</textarea>
 
                             <div class="flex items-center gap-3">
-                                <x-primary-button>Send POST</x-primary-button>
+                                <x-primary-button id="post-xml-submit">Send POST</x-primary-button>
                                 @if ($postStatus)
                                     <span class="text-sm text-gray-600">{{ $postStatus }}</span>
                                 @endif
@@ -440,24 +457,6 @@
         <input type="hidden" id="rest-tool-log-method" value="{{ $selectedLogMethod }}" />
     @endif
 
-    <div class="hidden" id="selected-node-editor">
-        <div class="fixed bottom-6 right-6 w-80 bg-white shadow-lg rounded-lg border border-gray-200 p-4">
-            <div class="flex items-center justify-between mb-2">
-                <h4 class="text-sm font-semibold text-gray-700">Edit Selected Node</h4>
-                <button type="button" id="close-node-editor" class="text-gray-400 hover:text-gray-600">✕</button>
-            </div>
-            <div class="text-xs text-gray-500 mb-2" id="selected-node-path">Path</div>
-            <label class="text-xs text-gray-500">Original</label>
-            <div class="text-sm text-gray-700 mb-2" id="selected-node-original"></div>
-            <label class="text-xs text-gray-500">New Value</label>
-            <input type="text" id="selected-node-input"
-                class="mt-1 w-full h-10 px-3 rounded-md border-gray-300 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500" />
-            <div class="mt-3 flex items-center justify-end gap-2">
-                <x-secondary-button type="button" id="selected-node-apply">Apply</x-secondary-button>
-            </div>
-        </div>
-    </div>
-
     <script>
         const attachmentsInput = document.getElementById("attachments");
         const attachmentsName = document.getElementById("attachments-filename");
@@ -480,5 +479,6 @@
         }
     </script>
 
+    <script src="{{ asset('js/buve-manager.js') }}?v={{ filemtime(public_path('js/buve-manager.js')) }}"></script>
     <script src="{{ asset('js/xml-tree.js') }}?v={{ filemtime(public_path('js/xml-tree.js')) }}"></script>
 </x-app-layout>

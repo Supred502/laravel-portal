@@ -23,16 +23,63 @@
     const allowChangePersistence = !logMethod || logMethod !== "GET";
     const changeKey =
         allowChangePersistence && logId ? `restTool.changeMap.${logId}` : null;
+    const generatedXmlDraftKey = logId
+        ? `restTool.generatedXmlDraft.${logId}`
+        : "restTool.generatedXmlDraft.current";
+    const generatedXmlLastDraftKey = "restTool.generatedXmlDraft.last";
     const formattedXml = document.getElementById("formatted-xml");
     const formattedXmlOriginal = formattedXml ? formattedXml.value : "";
     const generatedXmlArea = document.getElementById("generated-xml");
+    let generatedXmlLocked = !!(
+        generatedXmlArea && generatedXmlArea.value.trim() !== ""
+    );
     const requestXmlField = document.getElementById("request-xml");
-    const editor = document.getElementById("selected-node-editor");
-    const editorPath = document.getElementById("selected-node-path");
-    const editorOriginal = document.getElementById("selected-node-original");
-    const editorInput = document.getElementById("selected-node-input");
-    const editorApply = document.getElementById("selected-node-apply");
-    const editorClose = document.getElementById("close-node-editor");
+
+    const pathInputIndex = new Map();
+    const pathNodeValueIndex = new Map();
+    const originalValueCache = new Map();
+    const originalNodeExistsCache = new Map();
+    const parsedPathSegmentsCache = new Map();
+    let trackerRenderQueued = false;
+    let saveChangeMapTimer = null;
+    let formattedXmlUpdateTimer = null;
+
+    function scheduleChangeTrackerRender() {
+        if (trackerRenderQueued) {
+            return;
+        }
+        trackerRenderQueued = true;
+        requestAnimationFrame(() => {
+            trackerRenderQueued = false;
+            renderChangeTracker();
+        });
+    }
+
+    function scheduleSaveChangeMap() {
+        if (!allowChangePersistence) {
+            return;
+        }
+        if (saveChangeMapTimer) {
+            clearTimeout(saveChangeMapTimer);
+        }
+        saveChangeMapTimer = setTimeout(() => {
+            saveChangeMapTimer = null;
+            saveChangeMap();
+        }, 120);
+    }
+
+    function scheduleFormattedXmlUpdate() {
+        if (!formattedXml) {
+            return;
+        }
+        if (formattedXmlUpdateTimer) {
+            clearTimeout(formattedXmlUpdateTimer);
+        }
+        formattedXmlUpdateTimer = setTimeout(() => {
+            formattedXmlUpdateTimer = null;
+            updateFormattedXmlFromChanges();
+        }, 180);
+    }
 
     function renderChangeTracker() {
         if (!changeTracker) {
@@ -68,26 +115,94 @@
         }
     }
 
-    function applyChangesToInputs() {
-        Object.keys(changeMap).forEach((path) => {
-            const value = changeMap[path].value ?? "";
-            document
-                .querySelectorAll(
-                    `.xml-edit-input[data-path="${CSS.escape(path)}"]`,
-                )
-                .forEach((input) => {
+    function addIndexedElement(indexMap, path, element) {
+        if (!path || !element) {
+            return;
+        }
+        if (!indexMap.has(path)) {
+            indexMap.set(path, []);
+        }
+        indexMap.get(path).push(element);
+    }
+
+    function indexPathBoundElements() {
+        pathInputIndex.clear();
+        pathNodeValueIndex.clear();
+
+        document
+            .querySelectorAll(".xml-edit-input[data-path]")
+            .forEach((element) => {
+                addIndexedElement(
+                    pathInputIndex,
+                    element.getAttribute("data-path") || "",
+                    element,
+                );
+            });
+
+        document
+            .querySelectorAll(".node-value[data-node-path]")
+            .forEach((element) => {
+                addIndexedElement(
+                    pathNodeValueIndex,
+                    element.getAttribute("data-node-path") || "",
+                    element,
+                );
+            });
+    }
+
+    function getIndexedElements(indexMap, path, selector) {
+        if (indexMap.has(path)) {
+            return indexMap.get(path);
+        }
+        const matched = Array.from(document.querySelectorAll(selector));
+        indexMap.set(path, matched);
+        return matched;
+    }
+
+    function applyChangesToInputs(paths = null) {
+        const activeElement = document.activeElement;
+        const targetPaths = Array.isArray(paths)
+            ? paths
+            : Object.keys(changeMap);
+
+        targetPaths.forEach((path) => {
+            const value = getValueByPath(path);
+            const inputSelector = `.xml-edit-input[data-path="${CSS.escape(path)}"]`;
+            const nodeSelector = `.node-value[data-node-path="${CSS.escape(path)}"]`;
+
+            getIndexedElements(pathInputIndex, path, inputSelector).forEach(
+                (input) => {
+                    const isActive =
+                        !!activeElement &&
+                        (input === activeElement ||
+                            input.contains?.(activeElement) ||
+                            activeElement.contains?.(input));
+                    if (isActive) {
+                        return;
+                    }
+
                     if ("value" in input) {
                         input.value = value;
                     } else {
                         input.textContent = value;
                     }
-                });
+                },
+            );
 
-            document
-                .querySelectorAll(
-                    `.node-value[data-node-path="${CSS.escape(path)}"]`,
-                )
-                .forEach((nodeValue) => {
+            getIndexedElements(
+                pathNodeValueIndex,
+                path,
+                nodeSelector,
+            ).forEach((nodeValue) => {
+                    const isActive =
+                        !!activeElement &&
+                        (nodeValue === activeElement ||
+                            nodeValue.contains?.(activeElement) ||
+                            activeElement.contains?.(nodeValue));
+                    if (isActive) {
+                        return;
+                    }
+
                     nodeValue.textContent = value;
                     nodeValue.setAttribute("data-node-value", value);
                 });
@@ -123,7 +238,8 @@
         if (!originalXml) {
             return null;
         }
-        if (Object.keys(changeMap).length === 0) {
+        const changePaths = Object.keys(changeMap);
+        if (changePaths.length === 0) {
             return null;
         }
 
@@ -137,8 +253,8 @@
             return null;
         }
 
-        Object.keys(changeMap).forEach((path) => {
-            const segments = parsePathSegments(path);
+        changePaths.forEach((path) => {
+            const segments = getParsedPathSegments(path);
             if (segments.length === 0) {
                 return;
             }
@@ -238,19 +354,47 @@
         }
     }
 
+    function setChangeValue(path, original, value) {
+        const existing = changeMap[path];
+        if (value === original) {
+            if (existing) {
+                delete changeMap[path];
+                return true;
+            }
+            return false;
+        }
+
+        if (
+            existing &&
+            existing.original === original &&
+            existing.value === value
+        ) {
+            return false;
+        }
+
+        changeMap[path] = { original, value };
+        return true;
+    }
+
     function updateChange(path, original, value) {
         if (!path) {
             return;
         }
-        if (value === original || value === "") {
-            delete changeMap[path];
-        } else {
-            changeMap[path] = { original, value };
-        }
-        renderChangeTracker();
-        saveChangeMap();
-        updateFormattedXmlFromChanges();
-        updateApzimkopIfNeeded(path);
+
+        const changedPaths = [path];
+        setChangeValue(path, original, value);
+
+        const linkedChangedPaths = updateApzimkopIfNeeded(path);
+        linkedChangedPaths.forEach((linkedPath) => {
+            if (!changedPaths.includes(linkedPath)) {
+                changedPaths.push(linkedPath);
+            }
+        });
+
+        applyChangesToInputs(changedPaths);
+        scheduleChangeTrackerRender();
+        scheduleSaveChangeMap();
+        scheduleFormattedXmlUpdate();
     }
 
     let originalDocCache = null;
@@ -271,11 +415,23 @@
         return doc;
     }
 
+    function getParsedPathSegments(path) {
+        if (!path) {
+            return [];
+        }
+        if (parsedPathSegmentsCache.has(path)) {
+            return parsedPathSegmentsCache.get(path);
+        }
+        const parsed = parsePathSegments(path);
+        parsedPathSegmentsCache.set(path, parsed);
+        return parsed;
+    }
+
     function getNodeByPath(doc, path) {
         if (!doc || !path) {
             return null;
         }
-        const segments = parsePathSegments(path);
+        const segments = getParsedPathSegments(path);
         if (segments.length === 0) {
             return null;
         }
@@ -309,41 +465,160 @@
         if (!path) {
             return "";
         }
+        if (originalValueCache.has(path)) {
+            return originalValueCache.get(path);
+        }
         const doc = getOriginalDoc();
         const node = getNodeByPath(doc, path);
-        return node ? node.textContent || "" : "";
+        const value = node ? node.textContent || "" : "";
+        originalValueCache.set(path, value);
+        return value;
     }
 
     function updateChangeInternal(path, value) {
         const original = getOriginalValueByPath(path);
-        if (value === original || value === "") {
-            delete changeMap[path];
-        } else {
-            changeMap[path] = { original, value };
+        return setChangeValue(path, original, value);
+    }
+
+    function linkedPath(basePath, name, index) {
+        return `${basePath}/${name}[${index}]`;
+    }
+
+    function hasLinkedNode(path) {
+        if (!path) {
+            return false;
         }
+
+        if (changeMap[path]) {
+            return true;
+        }
+
+        if (originalNodeExistsCache.has(path)) {
+            return originalNodeExistsCache.get(path);
+        }
+
+        const doc = getOriginalDoc();
+        const exists = !!getNodeByPath(doc, path);
+        originalNodeExistsCache.set(path, exists);
+        return exists;
+    }
+
+    function splitApzimkopByCurrentValues(basePath, apzimkopValue, index) {
+        const source = String(apzimkopValue || "");
+        const currentKadter = getValueByPath(linkedPath(basePath, "KADTER", index));
+        const currentKadgrupa = getValueByPath(linkedPath(basePath, "KADGRUPA", index));
+        const currentZemenr = getValueByPath(linkedPath(basePath, "ZEMENR", index));
+        const currentZdbuvenr = getValueByPath(linkedPath(basePath, "ZDBUVENR", index));
+
+        let lenKadter = (currentKadter || "").length;
+        let lenKadgrupa = (currentKadgrupa || "").length;
+        let lenZemenr = (currentZemenr || "").length;
+        let lenZdbuvenr = (currentZdbuvenr || "").length;
+
+        const knownLength = lenKadter + lenKadgrupa + lenZemenr + lenZdbuvenr;
+        if (knownLength === 0 && source.length >= 12) {
+            lenKadter = 4;
+            lenKadgrupa = 4;
+            lenZemenr = 4;
+            lenZdbuvenr = Math.max(0, source.length - 12);
+        }
+
+        let cursor = 0;
+        const take = (requestedLength) => {
+            const safeLength = Math.max(0, requestedLength || 0);
+            const next = source.slice(cursor, cursor + safeLength);
+            cursor += safeLength;
+            return next;
+        };
+
+        const kadter = take(lenKadter);
+        const kadgrupa = take(lenKadgrupa);
+        const zemenr = take(lenZemenr);
+        const zdbuvenr = source.slice(cursor);
+
+        return {
+            kadter,
+            kadgrupa,
+            zemenr,
+            zdbuvenr,
+        };
     }
 
     function updateApzimkopIfNeeded(path) {
-        if (!path) {
-            return;
-        }
-        const match = path.match(/\/(KADTER|KADGRUPA|ZEMENR|ZDBUVENR)\[\d+\]$/);
-        if (!match) {
-            return;
-        }
-        const basePath = path.replace(/\/(KADTER|KADGRUPA|ZEMENR|ZDBUVENR)\[\d+\]$/, "");
-        const apzimkopPath = `${basePath}/APZIMKOP[1]`;
-        const kadter = getValueByPath(`${basePath}/KADTER[1]`);
-        const kadgrupa = getValueByPath(`${basePath}/KADGRUPA[1]`);
-        const zemenr = getValueByPath(`${basePath}/ZEMENR[1]`);
-        const zdbuvenr = getValueByPath(`${basePath}/ZDBUVENR[1]`);
-        const apzimkopValue = `${kadter}${kadgrupa}${zemenr}${zdbuvenr}`;
+        const changedPaths = [];
 
-        updateChangeInternal(apzimkopPath, apzimkopValue);
-        renderChangeTracker();
-        saveChangeMap();
-        applyChangesToInputs();
-        updateFormattedXmlFromChanges();
+        if (!path) {
+            return changedPaths;
+        }
+
+        const fieldMatch = path.match(/\/(KADTER|KADGRUPA|ZEMENR|ZDBUVENR)\[(\d+)\]$/i);
+        const apzimkopMatch = path.match(/\/APZIMKOP\[(\d+)\]$/i);
+
+        if (!fieldMatch && !apzimkopMatch) {
+            return changedPaths;
+        }
+
+        const basePath = fieldMatch
+            ? path.replace(/\/(KADTER|KADGRUPA|ZEMENR|ZDBUVENR)\[\d+\]$/i, "")
+            : path.replace(/\/APZIMKOP\[\d+\]$/i, "");
+
+        if (!/\/DMPNSOBJMBL\[\d+\]$/i.test(basePath)) {
+            return changedPaths;
+        }
+
+        const fieldIndex = Number.parseInt(fieldMatch?.[2] || apzimkopMatch?.[1] || "1", 10);
+        const index = Number.isFinite(fieldIndex) && fieldIndex > 0 ? fieldIndex : 1;
+
+        const kadterPath = linkedPath(basePath, "KADTER", index);
+        const kadgrupaPath = linkedPath(basePath, "KADGRUPA", index);
+        const zemenrPath = linkedPath(basePath, "ZEMENR", index);
+        const zdbuvenrPath = linkedPath(basePath, "ZDBUVENR", index);
+        const apzimkopPath = linkedPath(basePath, "APZIMKOP", index);
+
+        const linkedPaths = [
+            kadterPath,
+            kadgrupaPath,
+            zemenrPath,
+            zdbuvenrPath,
+            apzimkopPath,
+        ];
+        if (!linkedPaths.every((linked) => hasLinkedNode(linked))) {
+            return changedPaths;
+        }
+
+        if (fieldMatch) {
+            const kadter = getValueByPath(kadterPath);
+            const kadgrupa = getValueByPath(kadgrupaPath);
+            const zemenr = getValueByPath(zemenrPath);
+            const zdbuvenr = getValueByPath(zdbuvenrPath);
+            const apzimkopValue = `${kadter}${kadgrupa}${zemenr}${zdbuvenr}`;
+            if (updateChangeInternal(apzimkopPath, apzimkopValue)) {
+                changedPaths.push(apzimkopPath);
+            }
+        }
+
+        if (apzimkopMatch) {
+            const apzimkopValue = getValueByPath(apzimkopPath);
+            const segments = splitApzimkopByCurrentValues(
+                basePath,
+                apzimkopValue,
+                index,
+            );
+            const targetFields = ["kadter", "kadgrupa", "zemenr", "zdbuvenr"];
+
+            targetFields.forEach((name) => {
+                const fieldPath = linkedPath(basePath, name.toUpperCase(), index);
+                const currentValue = getValueByPath(fieldPath);
+                const nextValue = segments[name] ?? "";
+                if (currentValue !== nextValue) {
+                    if (updateChangeInternal(fieldPath, nextValue)) {
+                        changedPaths.push(fieldPath);
+                    }
+                }
+            });
+        }
+
+        return changedPaths;
     }
 
     document.addEventListener("input", (event) => {
@@ -372,83 +647,78 @@
             const value = target.textContent || "";
             target.setAttribute("data-node-value", value);
             updateChange(path, original, value);
-
-            document
-                .querySelectorAll(
-                    `.xml-edit-input[data-path="${CSS.escape(path)}"]`,
-                )
-                .forEach((input) => {
-                    if ("value" in input) {
-                        input.value = value;
-                    } else {
-                        input.textContent = value;
-                    }
-                });
         }
     });
 
+    indexPathBoundElements();
     loadChangeMap();
 
-    let currentPath = null;
-    let currentOriginal = "";
-
-    function openEditor(path, originalValue, originalFixed) {
-        if (!editor || !editorInput || !editorPath || !editorOriginal) {
+    function persistGeneratedXmlDraft() {
+        if (!generatedXmlArea) {
             return;
         }
-        currentPath = path;
-        currentOriginal = originalFixed || originalValue || "";
-        editorPath.textContent = path;
-        editorOriginal.textContent = currentOriginal;
-        editorInput.value = changeMap[path]?.value || originalValue || "";
-        editor.classList.remove("hidden");
+
+        const value = generatedXmlArea.value || "";
+        const hasValue = value.trim() !== "";
+
+        try {
+            if (hasValue) {
+                localStorage.setItem(generatedXmlDraftKey, value);
+                localStorage.setItem(generatedXmlLastDraftKey, value);
+            } else {
+                localStorage.removeItem(generatedXmlDraftKey);
+            }
+        } catch (e) {
+            // ignore storage errors
+        }
     }
 
-    document.addEventListener("click", (event) => {
-        const target = event.target?.closest?.(".node-label, .node-value");
-        if (!target) {
+    function restoreGeneratedXmlDraft() {
+        if (!generatedXmlArea) {
             return;
         }
-        openEditor(
-            target.dataset.nodePath,
-            target.dataset.nodeValue,
-            target.dataset.nodeOriginal,
-        );
-    });
 
-    if (editorApply) {
-        editorApply.addEventListener("click", () => {
-            const path =
-                currentPath || (editorPath ? editorPath.textContent : null);
-            if (!path) {
-                return;
-            }
-            const original =
-                currentOriginal ||
-                (editorOriginal ? editorOriginal.textContent : "");
-            const value = editorInput ? editorInput.value : "";
-            updateChange(path, original, value);
+        if (generatedXmlArea.value.trim() !== "") {
+            generatedXmlLocked = true;
+            persistGeneratedXmlDraft();
+            return;
+        }
 
-            document
-                .querySelectorAll(
-                    `.xml-edit-input[data-path="${CSS.escape(path)}"]`,
-                )
-                .forEach((input) => {
-                    if ("value" in input) {
-                        input.value = value;
-                    } else {
-                        input.textContent = value;
-                    }
-                });
+        let stored = null;
+        try {
+            stored =
+                localStorage.getItem(generatedXmlDraftKey) ||
+                localStorage.getItem(generatedXmlLastDraftKey);
+        } catch (e) {
+            stored = null;
+        }
 
-            document
-                .querySelectorAll(
-                    `.node-value[data-node-path="${CSS.escape(path)}"]`,
-                )
-                .forEach((nodeValue) => {
-                    nodeValue.textContent = value;
-                    nodeValue.setAttribute("data-node-value", value);
-                });
+        if (stored && stored.trim() !== "") {
+            generatedXmlArea.value = stored;
+            generatedXmlLocked = true;
+        }
+    }
+
+    function refreshGeneratedXmlFromAuto(force = false) {
+        if (!generatedXmlArea) {
+            return;
+        }
+
+        if (!force && generatedXmlLocked && generatedXmlArea.value.trim() !== "") {
+            return;
+        }
+
+        const payload = buildGeneratedXmlPayload();
+        generatedXmlArea.value = payload || "";
+        generatedXmlLocked = false;
+        persistGeneratedXmlDraft();
+    }
+
+    if (generatedXmlArea) {
+        restoreGeneratedXmlDraft();
+        generatedXmlArea.addEventListener("input", () => {
+            generatedXmlLocked = true;
+            persistGeneratedXmlDraft();
         });
     }
 
@@ -459,7 +729,12 @@
                 requestXmlField.value = originalXml || "";
             }
             if (generatedXmlArea) {
-                generatedXmlArea.value = buildGeneratedXmlPayload();
+                if (generatedXmlArea.value.trim() === "") {
+                    refreshGeneratedXmlFromAuto(true);
+                } else {
+                    generatedXmlLocked = true;
+                    persistGeneratedXmlDraft();
+                }
             }
             try {
                 const keys = Object.keys(changeMap);
@@ -473,14 +748,6 @@
                 );
             } catch (e) {
                 // ignore storage errors
-            }
-        });
-    }
-
-    if (editorClose) {
-        editorClose.addEventListener("click", () => {
-            if (editor) {
-                editor.classList.add("hidden");
             }
         });
     }
@@ -601,7 +868,7 @@
         postUrlInput.addEventListener("input", () => {
             localStorage.setItem(lastUrlKey, postUrlInput.value);
             if (generatedXmlArea && attachmentsInput?.files?.length) {
-                generatedXmlArea.value = buildGeneratedXmlPayload();
+                refreshGeneratedXmlFromAuto();
             }
         });
     }
@@ -620,7 +887,7 @@
                     "/attachments";
                 localStorage.setItem(lastUrlKey, attachmentPostUrlInput.value);
                 if (generatedXmlArea && attachmentsInput?.files?.length) {
-                    generatedXmlArea.value = buildGeneratedXmlPayload();
+                    refreshGeneratedXmlFromAuto();
                 }
             }
         };
@@ -630,7 +897,7 @@
         attachmentPostUrlInput.addEventListener("input", () => {
             localStorage.setItem(lastUrlKey, attachmentPostUrlInput.value);
             if (generatedXmlArea && attachmentsInput?.files?.length) {
-                generatedXmlArea.value = buildGeneratedXmlPayload();
+                refreshGeneratedXmlFromAuto();
             }
         });
 
@@ -644,10 +911,7 @@
             if (!generatedXmlArea) {
                 return;
             }
-            const payload = buildGeneratedXmlPayload();
-            if (payload) {
-                generatedXmlArea.value = payload;
-            }
+            refreshGeneratedXmlFromAuto();
         });
     }
 
@@ -663,7 +927,7 @@
         }
         input.addEventListener("input", () => {
             if (attachmentsInput?.files?.length && generatedXmlArea) {
-                generatedXmlArea.value = buildGeneratedXmlPayload();
+                refreshGeneratedXmlFromAuto();
             }
         });
     });
@@ -831,6 +1095,35 @@
         return clone;
     }
 
+    function ensureBuveSectionOrder(entityNode) {
+        if (!entityNode) {
+            return;
+        }
+
+        const objNode = getChildrenByName(entityNode, "DmPNSObjMBL")[0] || null;
+        const buveP2Node =
+            getChildrenByName(entityNode, "dmPNSBuveP2BL")[0] ||
+            getChildrenByName(entityNode, "DmPNSBuveP2BL")[0] ||
+            null;
+
+        if (!objNode || !buveP2Node || buveP2Node.parentNode !== entityNode) {
+            return;
+        }
+
+        const nextSibling = objNode.nextSibling;
+        if (nextSibling === buveP2Node) {
+            return;
+        }
+
+        entityNode.removeChild(buveP2Node);
+        if (nextSibling) {
+            entityNode.insertBefore(buveP2Node, nextSibling);
+            return;
+        }
+
+        entityNode.appendChild(buveP2Node);
+    }
+
     function trimRowFields(tblNode) {
         if (!tblNode) {
             return;
@@ -986,6 +1279,9 @@
                 "PK_KLIENTS",
                 "ADRESE",
                 "DOK_NR",
+                "dmPNSBuveP2BL",
+                "DmPNSBuveP2BL",
+                "PIEZIMES",
                 "tblRindas",
             ];
 
@@ -999,6 +1295,15 @@
                 "PILNADRESE",
                 "PK_ADR2",
                 "PK_ADR",
+            ];
+
+            const requiredDmPnsBuveP2Fields = [
+                "PK_BUVEGRP",
+                "GADS",
+                "INBUVE",
+                "EFEKTIV",
+                "ATSAVIN",
+                "PK_BSERIJA",
             ];
 
             getElementChildren(minimalEntity).forEach((child) => {
@@ -1051,6 +1356,43 @@
                 });
             }
 
+            const originalBuveP2Node =
+                getChildrenByName(entityNode, "dmPNSBuveP2BL")[0] ||
+                getChildrenByName(entityNode, "DmPNSBuveP2BL")[0] ||
+                null;
+            let minimalBuveP2Node =
+                getChildrenByName(minimalEntity, "dmPNSBuveP2BL")[0] ||
+                getChildrenByName(minimalEntity, "DmPNSBuveP2BL")[0] ||
+                null;
+
+            if (!minimalBuveP2Node && originalBuveP2Node) {
+                minimalBuveP2Node = cloneElementTree(originalBuveP2Node, minimalDoc);
+                minimalEntity.appendChild(minimalBuveP2Node);
+            }
+
+            if (minimalBuveP2Node && originalBuveP2Node) {
+                getElementChildren(minimalBuveP2Node).forEach((child) => {
+                    if (!requiredDmPnsBuveP2Fields.includes(child.nodeName)) {
+                        minimalBuveP2Node.removeChild(child);
+                    }
+                });
+
+                requiredDmPnsBuveP2Fields.forEach((name) => {
+                    const existing = getChildrenByName(minimalBuveP2Node, name);
+                    if (existing.length > 0) {
+                        return;
+                    }
+                    const originals = getChildrenByName(originalBuveP2Node, name);
+                    originals.forEach((origChild) => {
+                        minimalBuveP2Node.appendChild(
+                            cloneElementTree(origChild, minimalDoc),
+                        );
+                    });
+                });
+            }
+
+            ensureBuveSectionOrder(minimalEntity);
+
             getChildrenByName(minimalEntity, "tblRindas").forEach((tbl) => {
                 trimRowFields(tbl);
             });
@@ -1085,6 +1427,10 @@
             minNode.textContent = changeMap[path].value;
         });
 
+        if (minimalEntity) {
+            ensureBuveSectionOrder(minimalEntity);
+        }
+
         const serializer = new XMLSerializer();
         return serializer.serializeToString(minimalDoc);
     }
@@ -1102,7 +1448,7 @@
         if (!generatedXmlArea) {
             return;
         }
-        generatedXmlArea.value = buildGeneratedXmlPayload();
+        refreshGeneratedXmlFromAuto(true);
     }
 
     const generateButton = document.getElementById("generate-minimal-xml");
