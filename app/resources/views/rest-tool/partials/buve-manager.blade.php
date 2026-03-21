@@ -66,9 +66,8 @@
                 <x-input-label for="buve_dynamic_query" value="Dynamic Query Path" />
                 <div class="flex flex-col sm:flex-row gap-2">
                     <x-text-input id="buve_dynamic_query" name="buve_dynamic_query" type="text" class="block w-full"
-                        value="{{ old('buve_dynamic_query', $buveRememberedDynamicQuery) }}"
-                        placeholder="/query?filter=M_Statuss eq 1&columns=M_PK_PARD,M_KODS,M_NOSAUK" />
-                    <x-secondary-button type="button" id="open-buve-query-dialog">Open query dialog</x-secondary-button>
+                        value="{{ old('buve_dynamic_query', $buveRememberedDynamicQuery ?: '/query') }}"
+                        placeholder="/query?limit=20" />
                 </div>
                 <p class="text-xs text-gray-500">Uses Būve URL + Auth values above for request and authentication.</p>
                 <x-input-error :messages="$errors->get('buve_dynamic_query')" class="mt-2" />
@@ -116,33 +115,53 @@
 
             <p class="text-xs text-gray-500">Fields grouped by XML node: DmPNSObjMBL and dmPNSBuveP2BL. Linked cadastral fields auto-refresh APZIMKOP.</p>
 
-            <div class="overflow-auto" style="overflow-x: auto;">
-                <table class="text-sm text-left" style="min-width: max-content;">
+            <style>
+                .buve-grid-table th,
+                .buve-grid-table td {
+                    border-right: 1px solid #e5e7eb;
+                }
+
+                .buve-grid-table th:last-child,
+                .buve-grid-table td:last-child {
+                    border-right: none;
+                }
+
+                .buve-grid-table tbody td {
+                    border-bottom: 1px solid #e5e7eb;
+                }
+
+                .buve-grid-table tbody tr:last-child td {
+                    border-bottom: none;
+                }
+            </style>
+
+            <div class="overflow-auto border border-gray-200 rounded-md bg-white relative" style="overflow-x: auto; overflow-y: auto; height: 22rem; min-height: 14rem; resize: vertical;">
+                <table class="buve-grid-table text-sm text-left" style="min-width: max-content; border-collapse: separate; border-spacing: 0;">
                     <thead class="text-xs text-gray-600 border-b">
                         <tr class="uppercase border-b">
-                            <th class="py-2 px-3" rowspan="2">ID</th>
-                            <th class="py-2 px-3 text-center bg-sky-100 border-l-4 border-sky-300" colspan="7">DmPNSObjMBL</th>
-                            <th class="py-2 px-3 text-center bg-amber-100 border-l-4 border-amber-300" colspan="6">dmPNSBuveP2BL</th>
-                            <th class="py-2 px-3 text-center bg-slate-100 border-l-4 border-slate-300" colspan="1">Entity</th>
+                            <th class="py-2 px-3" style="position: sticky; top: 0; left: 0; z-index: 50; background-color: #ffffff; border-bottom: 1px solid #e5e7eb; height: 2.5rem;" rowspan="2">ID</th>
+                            <th class="py-2 px-3 text-center" style="position: sticky; top: 0; z-index: 30; background-color: #ffffff; border-bottom: 1px solid #e5e7eb; border-right: 1px solid #e5e7eb; height: 2.5rem;" colspan="7">DmPNSObjMBL</th>
+                            <th class="py-2 px-3 text-center" style="position: sticky; top: 0; z-index: 30; background-color: #ffffff; border-bottom: 1px solid #e5e7eb; border-right: 1px solid #e5e7eb; height: 2.5rem;" colspan="6">dmPNSBuveP2BL</th>
+                            <th class="py-2 px-3 text-center" style="position: sticky; top: 0; z-index: 30; background-color: #ffffff; border-bottom: 1px solid #e5e7eb; height: 2.5rem;" colspan="1">Entity</th>
                         </tr>
                         <tr class="uppercase">
-                            <th class="py-2 px-3 bg-sky-50 border-l-4 border-sky-300">PILNADRESE</th>
-                            <th class="py-2 px-3 bg-sky-50">ADRESE</th>
-                            <th class="py-2 px-3 bg-sky-50">KADTER</th>
-                            <th class="py-2 px-3 bg-sky-50">KADGRUPA</th>
-                            <th class="py-2 px-3 bg-sky-50">ZEMENR</th>
-                            <th class="py-2 px-3 bg-sky-50">ZDBUVENR</th>
-                            <th class="py-2 px-3 bg-sky-50">APZIMKOP</th>
-                            <th class="py-2 px-3 bg-amber-50 border-l-4 border-amber-300">PK_BUVEGRP</th>
-                            <th class="py-2 px-3 bg-amber-50">GADS</th>
-                            <th class="py-2 px-3 bg-amber-50">INBUVE</th>
-                            <th class="py-2 px-3 bg-amber-50">EFEKTIV</th>
-                            <th class="py-2 px-3 bg-amber-50">ATSAVIN</th>
-                            <th class="py-2 px-3 bg-amber-50">PK_BSERIJA</th>
-                            <th class="py-2 px-3 bg-slate-50 border-l-4 border-slate-300">PIEZIMES</th>
+                            <th class="py-2 px-3" style="position: sticky; top: 2.5rem; z-index: 30; background-color: #ffffff; border-bottom: 1px solid #e5e7eb; border-right: 1px solid #e5e7eb;">PILNADRESE</th>
+                            <th class="py-2 px-3" style="position: sticky; top: 2.5rem; z-index: 30; background-color: #ffffff; border-bottom: 1px solid #e5e7eb; border-right: 1px solid #e5e7eb;">ADRESE</th>
+                            <th class="py-2 px-3" style="position: sticky; top: 2.5rem; z-index: 30; background-color: #ffffff; border-bottom: 1px solid #e5e7eb; border-right: 1px solid #e5e7eb;">KADTER</th>
+                            <th class="py-2 px-3" style="position: sticky; top: 2.5rem; z-index: 30; background-color: #ffffff; border-bottom: 1px solid #e5e7eb; border-right: 1px solid #e5e7eb;">KADGRUPA</th>
+                            <th class="py-2 px-3" style="position: sticky; top: 2.5rem; z-index: 30; background-color: #ffffff; border-bottom: 1px solid #e5e7eb; border-right: 1px solid #e5e7eb;">ZEMENR</th>
+                            <th class="py-2 px-3" style="position: sticky; top: 2.5rem; z-index: 30; background-color: #ffffff; border-bottom: 1px solid #e5e7eb; border-right: 1px solid #e5e7eb;">ZDBUVENR</th>
+                            <th class="py-2 px-3" style="position: sticky; top: 2.5rem; z-index: 30; background-color: #ffffff; border-bottom: 1px solid #e5e7eb; border-right: 1px solid #e5e7eb;">APZIMKOP</th>
+                            <th class="py-2 px-3" style="position: sticky; top: 2.5rem; z-index: 30; background-color: #ffffff; border-bottom: 1px solid #e5e7eb; border-right: 1px solid #e5e7eb;">PK_BUVEGRP</th>
+                            <th class="py-2 px-3" style="position: sticky; top: 2.5rem; z-index: 30; background-color: #ffffff; border-bottom: 1px solid #e5e7eb; border-right: 1px solid #e5e7eb;">GADS</th>
+                            <th class="py-2 px-3" style="position: sticky; top: 2.5rem; z-index: 30; background-color: #ffffff; border-bottom: 1px solid #e5e7eb; border-right: 1px solid #e5e7eb;">INBUVE</th>
+                            <th class="py-2 px-3" style="position: sticky; top: 2.5rem; z-index: 30; background-color: #ffffff; border-bottom: 1px solid #e5e7eb; border-right: 1px solid #e5e7eb;">EFEKTIV</th>
+                            <th class="py-2 px-3" style="position: sticky; top: 2.5rem; z-index: 30; background-color: #ffffff; border-bottom: 1px solid #e5e7eb; border-right: 1px solid #e5e7eb;">ATSAVIN</th>
+                            <th class="py-2 px-3" style="position: sticky; top: 2.5rem; z-index: 30; background-color: #ffffff; border-bottom: 1px solid #e5e7eb; border-right: 1px solid #e5e7eb;">PK_BSERIJA</th>
+                            <th class="py-2 px-3" style="position: sticky; top: 2.5rem; z-index: 30; background-color: #ffffff; border-bottom: 1px solid #e5e7eb;">PIEZIMES</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y">
+                    <tbody>
                         @foreach ($buveRows as $row)
                             @php
                                 $rowId = (string) ($row['id'] ?? '');
@@ -162,11 +181,11 @@
                                 $currentPiezimes = old('rows.' . $rowId . '.piezimes', $row['piezimes'] ?? '');
                             @endphp
                             <tr data-buve-row>
-                                <td class="py-2 px-3 text-gray-700 font-medium">
+                                <td class="py-2 px-3 text-gray-700 font-medium" style="position: sticky; left: 0; z-index: 20; background-color: #ffffff;">
                                     {{ $rowId }}
                                     <input type="hidden" name="rows[{{ $rowId }}][id]" value="{{ $rowId }}" />
                                 </td>
-                                <td class="py-2 px-3 min-w-44 border-l-4 border-sky-200">
+                                <td class="py-2 px-3 min-w-44">
                                     <input type="text" name="rows[{{ $rowId }}][pilnadrese]" value="{{ $currentPilnadrese }}"
                                         data-field="pilnadrese" data-original="{{ $row['pilnadrese'] ?? '' }}"
                                         class="buve-editable-input w-full rounded-md border-gray-300 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500" />
@@ -201,7 +220,7 @@
                                         data-field="apzimkop" data-original="{{ $row['apzimkop'] ?? '' }}"
                                         class="buve-editable-input w-full rounded-md border-gray-300 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500" />
                                 </td>
-                                <td class="py-2 px-3 min-w-24 border-l-4 border-amber-200">
+                                <td class="py-2 px-3 min-w-24">
                                     <input type="text" name="rows[{{ $rowId }}][pk_buvegrp]" value="{{ $currentPkBuvegrp }}"
                                         data-field="pk_buvegrp" data-original="{{ $row['pk_buvegrp'] ?? '' }}"
                                         class="buve-editable-input w-full rounded-md border-gray-300 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500" />
@@ -231,7 +250,7 @@
                                         data-field="pk_bserija" data-original="{{ $row['pk_bserija'] ?? '' }}"
                                         class="buve-editable-input w-full rounded-md border-gray-300 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500" />
                                 </td>
-                                <td class="py-2 px-3 min-w-44 border-l-4 border-slate-200">
+                                <td class="py-2 px-3 min-w-44">
                                     <input type="text" name="rows[{{ $rowId }}][piezimes]" value="{{ $currentPiezimes }}"
                                         data-field="piezimes" data-original="{{ $row['piezimes'] ?? '' }}"
                                         class="buve-editable-input w-full rounded-md border-gray-300 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500" />
@@ -298,19 +317,3 @@
     @endif
 </div>
 
-<dialog id="buve-query-dialog" class="rounded-lg border border-gray-200 p-0 w-full max-w-2xl">
-    <form method="dialog" class="p-0">
-        <div class="p-4 border-b bg-gray-50 flex items-center justify-between">
-            <h4 class="text-sm font-semibold text-gray-800">Dynamic Query Builder</h4>
-            <button type="submit" id="buve-query-dialog-close" class="text-sm text-gray-500 hover:text-gray-700">Close</button>
-        </div>
-        <div class="p-4 space-y-3">
-            <p class="text-xs text-gray-500">Paste a query path, for example: /query?filter=M_Statuss eq 1&columns=M_PK_PARD,M_KODS,M_NOSAUK</p>
-            <textarea id="buve-query-dialog-input"
-                class="w-full h-32 rounded-md border-gray-300 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"></textarea>
-            <div class="flex items-center justify-end gap-2">
-                <x-secondary-button type="button" id="buve-query-dialog-apply">Apply query</x-secondary-button>
-            </div>
-        </div>
-    </form>
-</dialog>

@@ -7,6 +7,7 @@ use DOMDocument;
 use DOMElement;
 use Exception;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
@@ -34,6 +35,16 @@ class RestToolController extends Controller
         $rememberedAuthPassword = session('rest_tool.auth_password');
         $rememberedUrl = session('rest_tool.url');
         $rememberAuth = session('rest_tool.remember_auth', false);
+        $rememberedAuthCookie = $this->readRememberedAuthCookie($request, 'rest_tool_auth');
+        if (($rememberedAuthUsername === null || $rememberedAuthUsername === '') && ($rememberedAuthCookie['username'] ?? '') !== '') {
+            $rememberedAuthUsername = $rememberedAuthCookie['username'];
+        }
+        if (($rememberedAuthPassword === null || $rememberedAuthPassword === '') && array_key_exists('password', $rememberedAuthCookie)) {
+            $rememberedAuthPassword = (string) ($rememberedAuthCookie['password'] ?? '');
+        }
+        if (!session()->has('rest_tool.remember_auth') && array_key_exists('remember', $rememberedAuthCookie)) {
+            $rememberAuth = (bool) $rememberedAuthCookie['remember'];
+        }
         $buveRows = session('rest_tool.buve_rows', []);
         $buveLoadStatus = session('rest_tool.buve_load_status');
         $buveLoadError = session('rest_tool.buve_load_error');
@@ -48,7 +59,20 @@ class RestToolController extends Controller
         $buveRememberAuth = session('rest_tool.buve_remember_auth', $rememberAuth);
         $buveRememberedMode = session('rest_tool.buve_mode', 'predefined');
         $buveRememberedAddressFilter = session('rest_tool.buve_filter_pilnadrese');
-        $buveRememberedDynamicQuery = session('rest_tool.buve_dynamic_query');
+        $buveRememberedDynamicQuery = session('rest_tool.buve_dynamic_query', '/query');
+        if (trim((string) $buveRememberedDynamicQuery) === '') {
+            $buveRememberedDynamicQuery = '/query';
+        }
+        $rememberedBuveAuthCookie = $this->readRememberedAuthCookie($request, 'rest_tool_buve_auth');
+        if (($buveRememberedAuthUsername === null || $buveRememberedAuthUsername === '') && ($rememberedBuveAuthCookie['username'] ?? '') !== '') {
+            $buveRememberedAuthUsername = $rememberedBuveAuthCookie['username'];
+        }
+        if (($buveRememberedAuthPassword === null || $buveRememberedAuthPassword === '') && array_key_exists('password', $rememberedBuveAuthCookie)) {
+            $buveRememberedAuthPassword = (string) ($rememberedBuveAuthCookie['password'] ?? '');
+        }
+        if (!session()->has('rest_tool.buve_remember_auth') && array_key_exists('remember', $rememberedBuveAuthCookie)) {
+            $buveRememberAuth = (bool) $rememberedBuveAuthCookie['remember'];
+        }
 
         if ($request->filled('log')) {
             $log = RestActionLog::where('user_id', $request->user()->id)
@@ -523,14 +547,11 @@ class RestToolController extends Controller
         }
 
         $mode = $modes[0];
-        $dynamicQuery = trim((string) ($validated['buve_dynamic_query'] ?? ''));
-        $pilnadreseFilter = trim((string) ($validated['buve_filter_pilnadrese'] ?? ''));
-
-        if ($mode === 'dynamic' && $dynamicQuery === '') {
-            return redirect()->route('rest-tool.index')
-                ->with('rest_tool.buve_load_error', 'Dynamic query path is required for this mode.')
-                ->withInput();
+        $dynamicQuery = trim((string) ($validated['buve_dynamic_query'] ?? '/query'));
+        if ($dynamicQuery === '') {
+            $dynamicQuery = '/query';
         }
+        $pilnadreseFilter = trim((string) ($validated['buve_filter_pilnadrese'] ?? ''));
 
         if ($mode === 'predefined' && $pilnadreseFilter === '') {
             return redirect()->route('rest-tool.index')
@@ -578,14 +599,28 @@ class RestToolController extends Controller
             }
 
             $rows = $this->extractBuveRows($responseXml, $baseUrl);
+            if (empty($rows)) {
+                throw new Exception('No Būve IDs were found in the response. Use an endpoint that returns PK_OBJ href links (for example /rest/TdmPNSBuveSL/query).');
+            }
+
+            $rows = $this->hydrateBuveRowsWithEntityDetails($rows, $client, $baseUrl);
+
             if ($mode === 'predefined') {
                 $rows = array_values(array_filter($rows, function (array $row) use ($pilnadreseFilter) {
-                    return mb_stripos((string) ($row['pilnadrese'] ?? ''), $pilnadreseFilter) !== false;
+                    return mb_stripos((string) ($row['pilnadrese'] ?? ''), $pilnadreseFilter) !== false
+                        || mb_stripos((string) ($row['adrese'] ?? ''), $pilnadreseFilter) !== false;
                 }));
             }
 
             usort($rows, function (array $a, array $b) {
-                return strcmp((string) ($a['pilnadrese'] ?? ''), (string) ($b['pilnadrese'] ?? ''));
+                $aIdRaw = (string) ($a['id'] ?? '');
+                $bIdRaw = (string) ($b['id'] ?? '');
+
+                if (ctype_digit($aIdRaw) && ctype_digit($bIdRaw)) {
+                    return (int) $bIdRaw <=> (int) $aIdRaw;
+                }
+
+                return strcmp($bIdRaw, $aIdRaw);
             });
 
             $snapshotEntities = [];
@@ -594,7 +629,7 @@ class RestToolController extends Controller
                 $id = (string) ($row['id'] ?? '');
                 $payloadXml = $row['payload_xml'] ?? null;
                 $updateUrl = $row['update_url'] ?? null;
-                if ($id === '' || !$payloadXml || !$updateUrl) {
+                if ($id === '' || !$updateUrl) {
                     continue;
                 }
 
@@ -1031,39 +1066,83 @@ class RestToolController extends Controller
 
     private function persistGlobalAuthInSession(bool $rememberAuth, ?string $username, ?string $password): void
     {
-        if ($rememberAuth && $username) {
-            session()->put('rest_tool.auth_username', $username);
-            if ($password) {
-                session()->put('rest_tool.auth_password', $password);
-            }
+        $normalizedUsername = trim((string) ($username ?? ''));
+        $normalizedPassword = (string) ($password ?? '');
+
+        if ($rememberAuth && $normalizedUsername !== '') {
+            session()->put('rest_tool.auth_username', $normalizedUsername);
+            session()->put('rest_tool.auth_password', $normalizedPassword);
             session()->put('rest_tool.remember_auth', true);
+            $this->queueRememberedAuthCookie('rest_tool_auth', $normalizedUsername, $normalizedPassword);
             return;
         }
 
         session()->forget('rest_tool.auth_username');
         session()->forget('rest_tool.auth_password');
         session()->put('rest_tool.remember_auth', false);
+        Cookie::queue(Cookie::forget('rest_tool_auth'));
     }
 
     private function persistBuveAuthInSession(bool $rememberAuth, ?string $username, ?string $password): void
     {
-        if ($rememberAuth && $username) {
-            session()->put('rest_tool.buve_auth_username', $username);
-            if ($password) {
-                session()->put('rest_tool.buve_auth_password', $password);
-            }
+        $normalizedUsername = trim((string) ($username ?? ''));
+        $normalizedPassword = (string) ($password ?? '');
+
+        if ($rememberAuth && $normalizedUsername !== '') {
+            session()->put('rest_tool.buve_auth_username', $normalizedUsername);
+            session()->put('rest_tool.buve_auth_password', $normalizedPassword);
             session()->put('rest_tool.buve_remember_auth', true);
+            $this->queueRememberedAuthCookie('rest_tool_buve_auth', $normalizedUsername, $normalizedPassword);
             return;
         }
 
         session()->forget('rest_tool.buve_auth_username');
         session()->forget('rest_tool.buve_auth_password');
         session()->put('rest_tool.buve_remember_auth', false);
+        Cookie::queue(Cookie::forget('rest_tool_buve_auth'));
+    }
+
+    private function queueRememberedAuthCookie(string $cookieName, string $username, string $password): void
+    {
+        $cookiePayload = json_encode([
+            'username' => $username,
+            'password' => $password,
+            'remember' => true,
+        ]);
+
+        if (!is_string($cookiePayload)) {
+            return;
+        }
+
+        Cookie::queue($cookieName, $cookiePayload, 525600);
+    }
+
+    private function readRememberedAuthCookie(Request $request, string $cookieName): array
+    {
+        $rawCookie = $request->cookie($cookieName);
+        if (!is_string($rawCookie) || trim($rawCookie) === '') {
+            return [];
+        }
+
+        $decoded = json_decode($rawCookie, true);
+        if (!is_array($decoded)) {
+            return [];
+        }
+
+        return [
+            'username' => (string) ($decoded['username'] ?? ''),
+            'password' => (string) ($decoded['password'] ?? ''),
+            'remember' => (bool) ($decoded['remember'] ?? false),
+        ];
     }
 
     private function buildBuveLoadUrl(string $baseUrl, string $mode, string $dynamicQuery): string
     {
         if ($mode !== 'dynamic') {
+            if (preg_match('~/rest/TdmPNSBuveSL/?$~i', $baseUrl)) {
+                return rtrim($baseUrl, '/') . '/query';
+            }
+
             return $baseUrl;
         }
 
@@ -1104,6 +1183,17 @@ class RestToolController extends Controller
 
         $xpath = new \DOMXPath($dom);
         $entityNodes = $xpath->query('//*[local-name()="entity"]');
+        $rows = $this->extractBuveRowsFromEntityNodes($xpath, $entityNodes, $baseUrl);
+        if (!empty($rows)) {
+            return $rows;
+        }
+
+        $rowNodes = $xpath->query('//*[local-name()="row"]');
+        return $this->extractBuveRowsFromRowNodes($xpath, $rowNodes, $baseUrl);
+    }
+
+    private function extractBuveRowsFromEntityNodes(\DOMXPath $xpath, ?\DOMNodeList $entityNodes, string $baseUrl): array
+    {
         if (!$entityNodes || $entityNodes->length === 0) {
             return [];
         }
@@ -1146,6 +1236,113 @@ class RestToolController extends Controller
         }
 
         return $rows;
+    }
+
+    private function extractBuveRowsFromRowNodes(\DOMXPath $xpath, ?\DOMNodeList $rowNodes, string $baseUrl): array
+    {
+        if (!$rowNodes || $rowNodes->length === 0) {
+            return [];
+        }
+
+        $rows = [];
+        foreach ($rowNodes as $rowNode) {
+            if (!$rowNode instanceof DOMElement) {
+                continue;
+            }
+
+            $href = $this->firstNodeText($xpath, $rowNode, './/*[local-name()="OBJ"]/*[local-name()="PK_OBJ"]/*[local-name()="href"][1]');
+            if ($href === '') {
+                $href = $this->firstNodeText($xpath, $rowNode, './/*[local-name()="PK_OBJ"]/*[local-name()="href"][1]');
+            }
+
+            $id = $this->extractBuveIdFromHref($href);
+            if (!$id) {
+                continue;
+            }
+
+            $rows[] = [
+                'id' => $id,
+                'update_url' => $this->buildAbsoluteUrl($baseUrl, $href !== '' ? $href : '/rest/TdmPNSBuveBL/' . $id),
+                'adrese' => '',
+                'pilnadrese' => '',
+                'kadter' => '',
+                'kadgrupa' => '',
+                'zemenr' => '',
+                'zdbuvenr' => '',
+                'apzimkop' => '',
+                'pk_buvegrp' => '',
+                'gads' => '',
+                'inbuve' => '',
+                'efektiv' => '',
+                'atsavin' => '',
+                'pk_bserija' => '',
+                'piezimes' => '',
+                'payload_xml' => null,
+            ];
+        }
+
+        return $rows;
+    }
+
+    private function hydrateBuveRowsWithEntityDetails(array $rows, $client, string $baseUrl): array
+    {
+        $hydratedRows = [];
+
+        foreach ($rows as $row) {
+            $id = (string) ($row['id'] ?? '');
+            $updateUrl = (string) ($row['update_url'] ?? '');
+            $hasDetails = trim((string) ($row['pilnadrese'] ?? '')) !== ''
+                || trim((string) ($row['adrese'] ?? '')) !== '';
+
+            if ($id === '' || !$this->isHttpUrl($updateUrl) || ($hasDetails && !empty($row['payload_xml']))) {
+                $hydratedRows[] = $row;
+                continue;
+            }
+
+            try {
+                $entityResponse = $client->get($updateUrl);
+                if (!$entityResponse->successful()) {
+                    $hydratedRows[] = $row;
+                    continue;
+                }
+
+                $entityXml = $entityResponse->body();
+                if (strlen($entityXml) > 2 * 1024 * 1024) {
+                    $hydratedRows[] = $row;
+                    continue;
+                }
+
+                $entityRows = $this->extractBuveRows($entityXml, $baseUrl);
+                if (empty($entityRows)) {
+                    $hydratedRows[] = $row;
+                    continue;
+                }
+
+                $selectedEntityRow = null;
+                foreach ($entityRows as $entityRow) {
+                    if ((string) ($entityRow['id'] ?? '') === $id) {
+                        $selectedEntityRow = $entityRow;
+                        break;
+                    }
+                }
+
+                if (!$selectedEntityRow) {
+                    $selectedEntityRow = $entityRows[0];
+                }
+
+                $selectedEntityRow['id'] = $id;
+                $selectedEntityRow['update_url'] = $updateUrl;
+                if (empty($selectedEntityRow['payload_xml'])) {
+                    $selectedEntityRow['payload_xml'] = $row['payload_xml'] ?? null;
+                }
+
+                $hydratedRows[] = array_merge($row, $selectedEntityRow);
+            } catch (Exception $exception) {
+                $hydratedRows[] = $row;
+            }
+        }
+
+        return $hydratedRows;
     }
 
     private function firstNodeText(\DOMXPath $xpath, DOMElement $context, string $query): string

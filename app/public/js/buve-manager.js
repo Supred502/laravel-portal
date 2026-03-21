@@ -4,11 +4,6 @@
     const predefinedFields = document.getElementById(
         "buve-predefined-filter-fields",
     );
-    const dynamicInput = document.getElementById("buve_dynamic_query");
-    const openDialogButton = document.getElementById("open-buve-query-dialog");
-    const queryDialog = document.getElementById("buve-query-dialog");
-    const queryDialogInput = document.getElementById("buve-query-dialog-input");
-    const queryDialogApply = document.getElementById("buve-query-dialog-apply");
 
     function normalizeText(value) {
         return String(value || "").replace(/\r\n/g, "\n");
@@ -143,25 +138,6 @@
         input.addEventListener("change", syncModeFields);
     });
     syncModeFields();
-
-    if (openDialogButton && queryDialog && queryDialogInput && dynamicInput) {
-        openDialogButton.addEventListener("click", () => {
-            queryDialogInput.value = dynamicInput.value || "";
-            if (typeof queryDialog.showModal === "function") {
-                queryDialog.showModal();
-            }
-        });
-    }
-
-    if (queryDialogApply && queryDialogInput && dynamicInput && queryDialog) {
-        queryDialogApply.addEventListener("click", () => {
-            dynamicInput.value = queryDialogInput.value.trim();
-            dynamicInput.dispatchEvent(new Event("input", { bubbles: true }));
-            if (typeof queryDialog.close === "function") {
-                queryDialog.close();
-            }
-        });
-    }
 
     const modifiedCountElement = document.getElementById("buve-modified-count");
     const updateButton = document.getElementById("buve-update-submit");
