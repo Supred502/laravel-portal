@@ -99,6 +99,12 @@
     @if (!empty($buveRows))
         <form id="buve-update-form" method="POST" action="{{ route('rest-tool.buves.update') }}" class="space-y-4">
             @csrf
+            @php
+                $buveRowCount = count($buveRows);
+                $buveGridSizing = $buveRowCount <= 1
+                    ? 'height: auto; min-height: 0; max-height: 10rem; resize: none;'
+                    : 'height: 22rem; min-height: 14rem; resize: vertical;';
+            @endphp
             <input type="hidden" name="buve_base_url" id="buve_update_base_url"
                 value="{{ old('buve_base_url', $buveRememberedBaseUrl ?? $rememberedUrl) }}" />
             <input type="hidden" name="buve_auth_username" id="buve_update_auth_username"
@@ -135,7 +141,7 @@
                 }
             </style>
 
-            <div class="overflow-auto border border-gray-200 rounded-md bg-white relative" style="overflow-x: auto; overflow-y: auto; height: 22rem; min-height: 14rem; resize: vertical;">
+            <div class="overflow-auto border border-gray-200 rounded-md bg-white relative" style="overflow-x: auto; overflow-y: auto; {{ $buveGridSizing }}">
                 <table class="buve-grid-table text-sm text-left" style="min-width: max-content; border-collapse: separate; border-spacing: 0;">
                     <thead class="text-xs text-gray-600 border-b">
                         <tr class="uppercase border-b">

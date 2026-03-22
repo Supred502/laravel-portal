@@ -12,6 +12,22 @@
 
     <div class="py-12">
         <div class="max-w-7xl mx-auto sm:px-6 lg:px-8 space-y-6">
+            <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg" data-panel-id="buve-tools">
+                <div class="p-6">
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-lg font-semibold text-gray-800">Būve</h3>
+                        <button type="button" class="panel-toggle text-sm text-gray-500 hover:text-gray-700"
+                            data-panel-toggle="buve-tools">
+                            Toggle
+                        </button>
+                    </div>
+
+                    <div class="panel-body mt-4" data-panel-body="buve-tools">
+                        @include('rest-tool.partials.buve-manager')
+                    </div>
+                </div>
+            </div>
+
             <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg" data-panel-id="url-auth">
                 <div class="p-6">
                     <div class="flex items-center justify-between">
@@ -67,22 +83,6 @@
                             @endif
                         </form>
 
-                    </div>
-                </div>
-            </div>
-
-            <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg" data-panel-id="buve-tools">
-                <div class="p-6">
-                    <div class="flex items-center justify-between">
-                        <h3 class="text-lg font-semibold text-gray-800">Būve</h3>
-                        <button type="button" class="panel-toggle text-sm text-gray-500 hover:text-gray-700"
-                            data-panel-toggle="buve-tools">
-                            Toggle
-                        </button>
-                    </div>
-
-                    <div class="panel-body mt-4" data-panel-body="buve-tools">
-                        @include('rest-tool.partials.buve-manager')
                     </div>
                 </div>
             </div>
